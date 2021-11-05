@@ -21,6 +21,7 @@ class AbandonConflictTest(BitcoinTestFramework):
         self.extra_args = [["-minrelaytxfee=0.00001"], []]
 
     def run_test(self):
+        BASE_CB_AMOUNT = Decimal(5000)
         self.nodes[1].generate(100)
         sync_blocks(self.nodes)
         balance = self.nodes[0].getbalance()
@@ -35,7 +36,7 @@ class AbandonConflictTest(BitcoinTestFramework):
 
         sync_blocks(self.nodes)
         newbalance = self.nodes[0].getbalance()
-        burned = Decimal(10000) * 3 * BURNED_PERCENT1 / BURNED_PERCENT2 # change is returned to new address, so part of it is burned too
+        (_, burned) = BurnedAndChangeAmount(BASE_CB_AMOUNT * 3, 0)
         assert_greater_than_or_equal(Decimal("0.1") + burned, balance - newbalance) #no more than fees and burned lost
         balance = newbalance
 
@@ -58,9 +59,9 @@ class AbandonConflictTest(BitcoinTestFramework):
         signed_bad = self.nodes[0].signrawtransaction(self.nodes[0].createrawtransaction(inputs, outputs))
         assert_raises_rpc_error(-26, 'bad-burned', self.nodes[0].sendrawtransaction, signed_bad["hex"])
         outputs = {}
-        burned = Decimal(20) * BURNED_PERCENT1 / BURNED_PERCENT2
+        (burned, change) = BurnedAndChangeAmount(Decimal("19.998"), Decimal("14.998"))
         outputs[self.nodes[0].getnewaddress()] = Decimal("14.998")
-        outputs[self.nodes[1].getnewaddress()] = Decimal("5") - burned
+        outputs[self.nodes[1].getnewaddress()] = change
         outputs[GraveAddress()] = burned
         signed = self.nodes[0].signrawtransaction(self.nodes[0].createrawtransaction(inputs, outputs))
         txAB1 = self.nodes[0].sendrawtransaction(signed["hex"])

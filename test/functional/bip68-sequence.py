@@ -7,6 +7,7 @@
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 from test_framework.blocktools import *
+from test_framework.script import GetP2PKHScript, GRAVE_PKH, GraveAddress
 
 SEQUENCE_LOCKTIME_DISABLE_FLAG = (1<<31)
 SEQUENCE_LOCKTIME_TYPE_FLAG = (1<<22) # this means use time (0 means height)
@@ -61,14 +62,15 @@ class BIP68Test(BitcoinTestFramework):
         utxo = utxos[0]
 
         tx1 = CTransaction()
-        value = int(satoshi_round(utxo["amount"] - self.relayfee)*COIN)
+        value = utxo["amount"] - self.relayfee
+        (burn, rest) = BurnedAndChangeAmount(value, 0)
 
         # Check that the disable flag disables relative locktime.
         # If sequence locks were used, this would require 1 block for the
         # input to mature.
         sequence_value = SEQUENCE_LOCKTIME_DISABLE_FLAG | 1
         tx1.vin = [CTxIn(COutPoint(int(utxo["txid"], 16), utxo["vout"]), nSequence=sequence_value)] 
-        tx1.vout = [CTxOut(value, CScript([b'a']))]
+        tx1.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])), CTxOut(ToSatoshi(burn), GetP2PKHScript(GRAVE_PKH))]
 
         tx1_signed = self.nodes[0].signrawtransaction(ToHex(tx1))["hex"]
         tx1_id = self.nodes[0].sendrawtransaction(tx1_signed)
@@ -78,9 +80,11 @@ class BIP68Test(BitcoinTestFramework):
         # fail
         tx2 = CTransaction()
         tx2.nVersion = 2
+        value = rest - self.relayfee
+        (burn, rest) = BurnedAndChangeAmount(value, 0)
         sequence_value = sequence_value & 0x7fffffff
         tx2.vin = [CTxIn(COutPoint(tx1_id, 0), nSequence=sequence_value)]
-        tx2.vout = [CTxOut(int(value-self.relayfee*COIN), CScript([b'a']))]
+        tx2.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])), CTxOut(ToSatoshi(burn), GetP2PKHScript(GRAVE_PKH))]
         tx2.rehash()
 
         assert_raises_rpc_error(-26, NOT_FINAL_ERROR, self.nodes[0].sendrawtransaction, ToHex(tx2))
@@ -108,10 +112,15 @@ class BIP68Test(BitcoinTestFramework):
         while len(self.nodes[0].listunspent()) < 200:
             import random
             random.shuffle(addresses)
-            num_outputs = random.randint(1, max_outputs)
+            num_outputs = random.randint(1, max_outputs - 1)
             outputs = {}
+            out_total = 0
             for i in range(num_outputs):
-                outputs[addresses[i]] = random.randint(1, 20)*0.01
+                value = random.randint(1, 20) * Decimal('0.01')
+                outputs[addresses[i]] = value
+                out_total += value
+            (burn, _) = BurnedAndChangeAmount(value, 0)
+            outputs[GraveAddress()] = burn
             self.nodes[0].sendmany("", outputs)
             self.nodes[0].generate(1)
 

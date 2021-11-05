@@ -1013,5 +1013,7 @@ def MoneyboxP2SHAddress(testnet = True):
 
 def GraveAddress(testnet = True):
     assert (testnet)
-    return AddressFromPubkeyHash(GRAVE_PKH, testnet)
+    addr = AddressFromPubkeyHash(GRAVE_PKH, testnet)
+    assert_equal(addr, GRAVE_ADDRESS)
+    return addr
     # return 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk' if testnet else 'U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho'

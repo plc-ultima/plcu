@@ -161,9 +161,9 @@ public:
         nPruneAfterHeight  = 100000;
 
         // Note that of those with the service bits flag, most only support a subset of possible options
-        vSeeds.push_back(CDNSSeedData("bc01.plcu.io", "bc01.plcu.io"));
-        vSeeds.push_back(CDNSSeedData("bc02.plcu.io", "bc02.plcu.io"));
-        vSeeds.push_back(CDNSSeedData("bc03.plcu.io", "bc03.plcu.io"));
+        vSeeds.push_back(CDNSSeedData("bc01.plcu.io", false));
+        vSeeds.push_back(CDNSSeedData("bc02.plcu.io", false));
+        vSeeds.push_back(CDNSSeedData("bc03.plcu.io", false));
 
         vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
 
@@ -274,10 +274,10 @@ public:
         vSeeds.clear();
 
         // nodes with support for servicebits filtering should be at the top
-        vSeeds.push_back(CDNSSeedData("bc0.testnet.plcu.io", "bc0.testnet.plcu.io"));
-        vSeeds.push_back(CDNSSeedData("bc1.testnet.plcu.io", "bc1.testnet.plcu.io"));
-        vSeeds.push_back(CDNSSeedData("bc2.testnet.plcu.io", "bc2.testnet.plcu.io"));
-        vSeeds.push_back(CDNSSeedData("bc3.testnet.plcu.io", "bc3.testnet.plcu.io"));
+        vSeeds.push_back(CDNSSeedData("bc0.testnet.plcu.io", false));
+        vSeeds.push_back(CDNSSeedData("bc1.testnet.plcu.io", false));
+        vSeeds.push_back(CDNSSeedData("bc2.testnet.plcu.io", false));
+        vSeeds.push_back(CDNSSeedData("bc3.testnet.plcu.io", false));
 
         vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_test, pnSeed6_test + ARRAYLEN(pnSeed6_test));
 

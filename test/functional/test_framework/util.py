@@ -23,8 +23,7 @@ from .authproxy import AuthServiceProxy, JSONRPCException
 
 COIN = 100000000 # 1 PLCU in satoshis
 DUST_OUTPUT_THRESHOLD = 54000
-BURNED_PERCENT1 = 3
-BURNED_PERCENT2 = 100
+GRAVE_ADDRESS = 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk'
 
 logger = logging.getLogger("TestFramework.utils")
 
@@ -487,8 +486,10 @@ def random_transaction(nodes, amount, min_fee, fee_increment, fee_variants):
     fee = min_fee + fee_increment * random.randint(0, fee_variants)
 
     (total_in, inputs) = gather_inputs(from_node, amount + fee)
-    outputs = make_change(from_node, total_in, amount, fee)
+    (burn, rest) = BurnedAndChangeAmount(total_in - fee, amount)
+    outputs = make_change(from_node, total_in - burn, amount, fee)
     outputs[to_node.getnewaddress()] = float(amount)
+    outputs[GRAVE_ADDRESS] = burn
 
     rawtx = from_node.createrawtransaction(inputs, outputs)
     signresult = from_node.signrawtransaction(rawtx)
@@ -519,8 +520,11 @@ def create_confirmed_utxos(fee, node, count, min_amount=None, gen_blocks_first=T
         inputs.append({"txid": t["txid"], "vout": t["vout"]})
         outputs = {}
         send_value = t['amount'] - fee
-        outputs[addr1] = satoshi_round(send_value / 2)
-        outputs[addr2] = satoshi_round(send_value / 2)
+        send_value_a = satoshi_round(send_value / 2)
+        (burn, send_value_b) = BurnedAndChangeAmount(send_value, send_value_a)
+        outputs[addr1] = send_value_a
+        outputs[addr2] = send_value_b
+        outputs[GRAVE_ADDRESS] = burn
         raw_tx = node.createrawtransaction(inputs, outputs)
         signed_tx = node.signrawtransaction(raw_tx)["hex"]
         node.sendrawtransaction(signed_tx)
@@ -651,3 +655,17 @@ def node_listunspent(node, minconf=1, maxconf=9999999, addresses=[], include_uns
     if minimumSumAmount is not None:
         query_options['minimumSumAmount'] = minimumSumAmount
     return node.listunspent(minconf, maxconf, addresses, include_unsafe, query_options)
+
+# total_out_amount == input_amount - fee
+def BurnedAndChangeAmount(total_out_amount, dest_amount):
+    assert_greater_than(total_out_amount, dest_amount)
+    assert_greater_than_or_equal(dest_amount, 0)
+    # percent = 0.03
+    # change = total_out_amount / (1 + percent) - dest_amount
+    # burn = total_out_amount * percent / (1 + percent)
+    change = ToCoins(total_out_amount * 100 / 103 - dest_amount)
+    burn = ToCoins(total_out_amount * 3 / 103)
+    if change + burn < total_out_amount - dest_amount:
+        burn += Decimal('0.00000001')
+    assert_equal(change + burn, total_out_amount - dest_amount)
+    return (burn, change)

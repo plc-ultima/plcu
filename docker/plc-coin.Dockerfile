@@ -20,7 +20,7 @@ RUN useradd -r plcultima \
 
 VOLUME ["/home/plcultima/.plcultima"]
 
-EXPOSE 19330 19331
+# EXPOSE 19330 19331
 
 ENTRYPOINT ["/entrypoint.sh"]
 

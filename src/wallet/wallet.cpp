@@ -2882,7 +2882,8 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
 
                 const std::pair<CAmount, CAmount> transfer = getTransferAmount(txNew.vin, txNew.vout);
 
-                mustBeBurned = transfer.second > transfer.first * 0.3 ? transfer.second : transfer.first * 0.03;
+                mustBeBurned = std::max(transfer.second,
+                                        static_cast<CAmount>(transfer.first * 0.03) - transfer.second);
                 if (nFeeRet >= nFeeNeeded + mustBeBurned)
                 {
                     // Reduce fee to only the needed amount if possible. This
