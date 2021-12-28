@@ -5,10 +5,7 @@
 """Test Hierarchical Deterministic wallet function."""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (
-    assert_equal,
-    connect_nodes_bi,
-)
+from test_framework.util import *
 import shutil
 
 class WalletHDTest(BitcoinTestFramework):
@@ -58,7 +55,8 @@ class WalletHDTest(BitcoinTestFramework):
             assert_equal(hd_info["hdmasterkeyid"], masterkeyid)
             self.nodes[0].sendtoaddress(hd_add, 1)
             self.nodes[0].generate(1)
-        self.nodes[0].sendtoaddress(non_hd_add, 1)
+        txid = self.nodes[0].sendtoaddress(non_hd_add, 1)
+        assert_in(txid, self.nodes[0].getrawmempool())
         self.nodes[0].generate(1)
 
         # create an internal key (again)
@@ -94,15 +92,24 @@ class WalletHDTest(BitcoinTestFramework):
         self.start_node(1, extra_args=self.extra_args[1] + ['-rescan'])
         assert_equal(self.nodes[1].getbalance(), num_hd_adds + 1)
 
-        # send a tx and make sure its using the internal chain for the changeoutput
+        # send a tx and make sure its using the internal chain for the changeoutput (with changeToNewAddress == False)
         txid = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1)
         outs = self.nodes[1].decoderawtransaction(self.nodes[1].gettransaction(txid)['hex'])['vout']
         keypath = ""
         for out in outs:
-            if out['value'] != 1:
+            if out['value'] != 1 and out['scriptPubKey']['addresses'][0] not in [GRAVE_ADDRESS_1, GRAVE_ADDRESS_2]:
                 keypath = self.nodes[1].validateaddress(out['scriptPubKey']['addresses'][0])['hdkeypath']
-        
+        assert_equal(keypath[0:7], "m/0'/0'")
+
+        # send a tx and make sure its using the internal chain for the changeoutput (with changeToNewAddress == True)
+        txid = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1, '', '', False, False, DEFAULT_TX_CONFIRM_TARGET, 'UNSET', True)
+        outs = self.nodes[1].decoderawtransaction(self.nodes[1].gettransaction(txid)['hex'])['vout']
+        keypath = ""
+        for out in outs:
+            if out['value'] != 1 and out['scriptPubKey']['addresses'][0] not in [GRAVE_ADDRESS_1, GRAVE_ADDRESS_2]:
+                keypath = self.nodes[1].validateaddress(out['scriptPubKey']['addresses'][0])['hdkeypath']
         assert_equal(keypath[0:7], "m/0'/1'")
+
 
 if __name__ == '__main__':
     WalletHDTest().main ()

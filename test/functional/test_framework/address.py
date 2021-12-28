@@ -32,12 +32,12 @@ def byte_to_base58(b, version):
 
 def keyhash_to_p2pkh(hash, main = False):
     assert (len(hash) == 20)
-    version = hex_str_to_bytes('02d0a8') if main else hex_str_to_bytes('02d0a4')
+    version = hex_str_to_bytes('C80528') if main else hex_str_to_bytes('C80524')
     return byte_to_base58(hash, version)
 
 def scripthash_to_p2sh(hash, main = False):
     assert (len(hash) == 20)
-    version = hex_str_to_bytes('02d0a9') if main else hex_str_to_bytes('02d0a5')
+    version = hex_str_to_bytes('C80529') if main else hex_str_to_bytes('C80525')
     return byte_to_base58(hash, version)
 
 def key_to_p2pkh(key, main = False):

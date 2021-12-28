@@ -20,22 +20,25 @@ class MempoolPackagesTest(BitcoinTestFramework):
     # Return amount sent
     def chain_transaction(self, node, parent_txid, vout, value, fee, num_outputs):
         assert_greater_than(value, fee)
-        send_value = satoshi_round((value - fee)/num_outputs)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(value - fee)
+        send_value = satoshi_round(rest/num_outputs)
         inputs = [ {'txid' : parent_txid, 'vout' : vout} ]
         outputs = {}
         for i in range(num_outputs):
             outputs[node.getnewaddress()] = send_value
+        outputs[GRAVE_ADDRESS_1] = burn1
+        outputs[GRAVE_ADDRESS_2] = burn2
         rawtx = node.createrawtransaction(inputs, outputs)
         signedtx = node.signrawtransaction(rawtx)
         txid = node.sendrawtransaction(signedtx['hex'])
         fulltx = node.getrawtransaction(txid, 1)
-        assert(len(fulltx['vout']) == num_outputs) # make sure we didn't generate a change output
+        assert(len(fulltx['vout']) == num_outputs + 2) # make sure we didn't generate a change output (+2 are grave outputs)
         return (txid, send_value)
 
     def run_test(self):
         utxo = self.nodes[0].listunspent(10)
         for u in utxo:
-            assert_equal(u['amount'], 6000000)  # if not, filter utxo and choose those with large enough amount to build tx chains
+            assert_equal(u['amount'], BASE_CB_AMOUNT)  # if not, filter utxo and choose those with large enough amount to build tx chains
         txid = utxo[0]['txid']
         vout = utxo[0]['vout']
         value = utxo[0]['amount']
@@ -200,11 +203,14 @@ class MempoolPackagesTest(BitcoinTestFramework):
         value = utxo[0]['amount']
         vout = utxo[0]['vout']
 
-        send_value = satoshi_round((value - fee)/2)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(value - fee)
+        send_value = satoshi_round(rest/2)
         inputs = [ {'txid' : txid, 'vout' : vout} ]
         outputs = {}
         for i in range(2):
             outputs[self.nodes[0].getnewaddress()] = send_value
+        outputs[GRAVE_ADDRESS_1] = burn1
+        outputs[GRAVE_ADDRESS_2] = burn2
         rawtx = self.nodes[0].createrawtransaction(inputs, outputs)
         signedtx = self.nodes[0].signrawtransaction(rawtx)
         txid = self.nodes[0].sendrawtransaction(signedtx['hex'])
@@ -227,8 +233,9 @@ class MempoolPackagesTest(BitcoinTestFramework):
         self.sync_all()
 
         # Now generate tx8, with a big fee
+        (burn1, burn2, rest) = BurnedAndChangeAmount(tx1_value + value - 4*fee)
         inputs = [ {'txid' : tx1_id, 'vout': 0}, {'txid' : txid, 'vout': 0} ]
-        outputs = { self.nodes[0].getnewaddress() : send_value + value - 4*fee }
+        outputs = { self.nodes[0].getnewaddress() : rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2 }
         rawtx = self.nodes[0].createrawtransaction(inputs, outputs)
         signedtx = self.nodes[0].signrawtransaction(rawtx)
         txid = self.nodes[0].sendrawtransaction(signedtx['hex'])

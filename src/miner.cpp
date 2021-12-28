@@ -170,11 +170,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
 
     // miner subsidy
-    CAmount subsidy = GetBlockSubsidy(nHeight, chainparams.GetConsensus());
-    if (subsidy == 0)
-    {
-        subsidy = std::max<int64_t>(nFees / 2, .005 * COIN);
-    }
+    CAmount subsidy = GetBlockSubsidy(nHeight, nFees, chainparams.GetConsensus());
 
     // coinbase outs
     coinbaseTx.vout.resize(1);
@@ -186,6 +182,14 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
     if (nHeight <= chainparams.countOfInitialAwardBlocks())
     {
         nRefill = 1000 * COIN;
+    }
+
+    CAmount totalAmount = getTotalAmount().first;
+    if (totalAmount + nRefill > chainparams.GetConsensus().maxTotalAmount)
+    {
+        nRefill = (totalAmount >= chainparams.GetConsensus().maxTotalAmount) ?
+                    0 :
+                    chainparams.GetConsensus().maxTotalAmount - totalAmount;
     }
 
     // PLCU award

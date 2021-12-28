@@ -6,7 +6,7 @@
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
-from test_framework.script import CScript, OP_1, OP_DROP, OP_2, OP_HASH160, OP_EQUAL, hash160, OP_TRUE
+from test_framework.script import *
 from test_framework.mininode import CTransaction, CTxIn, CTxOut, COutPoint, ToHex, COIN
 
 # Construct 2 trivial P2SH's and the ScriptSigs that spend them
@@ -40,25 +40,30 @@ def small_txpuzzle_randfee(from_node, conflist, unconflist, amount, min_fee, fee
     fee = min_fee - fee_increment + satoshi_round(rand_fee)
     tx = CTransaction()
     total_in = Decimal("0.00000000")
-    while total_in <= (amount + fee) and len(conflist) > 0:
+    (burn1, burn2) = GetBurnedValue(amount + fee)
+    required = amount + fee + burn1 + burn2
+    while total_in <= required and len(conflist) > 0:
         t = conflist.pop(0)
         total_in += t["amount"]
         tx.vin.append(CTxIn(COutPoint(int(t["txid"], 16), t["vout"]), b""))
-    if total_in <= amount + fee:
-        while total_in <= (amount + fee) and len(unconflist) > 0:
+    if total_in <= required:
+        while total_in <= required and len(unconflist) > 0:
             t = unconflist.pop(0)
             total_in += t["amount"]
             tx.vin.append(CTxIn(COutPoint(int(t["txid"], 16), t["vout"]), b""))
-        if total_in <= amount + fee:
-            raise RuntimeError("Insufficient funds: need %d, have %d"%(amount+fee, total_in))
-    tx.vout.append(CTxOut(int((total_in - amount - fee)*COIN), P2SH_1))
-    tx.vout.append(CTxOut(int(amount*COIN), P2SH_2))
+        if total_in <= required:
+            raise RuntimeError("Insufficient funds: need %d, have %d"%(required, total_in))
+    (burn1, burn2, change) = BurnedAndChangeAmount(total_in - fee, amount)
+    tx.vout.append(CTxOut(ToSatoshi(change), P2SH_1))
+    tx.vout.append(CTxOut(ToSatoshi(amount), P2SH_2))
+    tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+    tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
     # These transactions don't need to be signed, but we still have to insert
     # the ScriptSig that will satisfy the ScriptPubKey.
     for inp in tx.vin:
         inp.scriptSig = SCRIPT_SIG[inp.prevout.n]
     txid = from_node.sendrawtransaction(ToHex(tx), True)
-    unconflist.append({ "txid" : txid, "vout" : 0 , "amount" : total_in - amount - fee})
+    unconflist.append({ "txid" : txid, "vout" : 0 , "amount" : change})
     unconflist.append({ "txid" : txid, "vout" : 1 , "amount" : amount})
 
     return (ToHex(tx), fee)
@@ -74,11 +79,13 @@ def split_inputs(from_node, txins, txouts, initial_split = False):
     prevtxout = txins.pop()
     tx = CTransaction()
     tx.vin.append(CTxIn(COutPoint(int(prevtxout["txid"], 16), prevtxout["vout"]), b""))
-
-    half_change = satoshi_round(prevtxout["amount"]/2)
-    rem_change = prevtxout["amount"] - half_change  - Decimal("0.00050000")
+    (burn1, burn2, rest) = BurnedAndChangeAmount(prevtxout["amount"] - Decimal("0.00050000"))
+    half_change = satoshi_round(rest/2)
+    rem_change = rest - half_change
     tx.vout.append(CTxOut(int(half_change*COIN), P2SH_1))
     tx.vout.append(CTxOut(int(rem_change*COIN), P2SH_2))
+    tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+    tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
 
     # If this is the initial split we actually need to sign the transaction
     # Otherwise we just need to insert the proper ScriptSig

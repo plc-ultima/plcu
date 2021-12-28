@@ -523,6 +523,7 @@ class FullBlockTest(ComparisonTestFramework):
         total_size=len(b39.serialize())
         while(total_size < MAX_BLOCK_BASE_SIZE):
             tx_new = create_tx(tx_last, 1, 1, p2sh_script)
+            assert_greater_than_or_equal(tx_last.vout[1].nValue, 1)
             tx_new.vout.append(CTxOut(tx_last.vout[1].nValue - 1, CScript([OP_TRUE])))
             tx_new.rehash()
             total_size += len(tx_new.serialize())
@@ -816,7 +817,7 @@ class FullBlockTest(ComparisonTestFramework):
         # tx with output value > input value out of range
         tip(57)
         b59 = block(59)
-        tx = create_and_sign_tx(out[17].tx, out[17].n, (6000000 + 1) * COIN)
+        tx = create_and_sign_tx(out[17].tx, out[17].n, BASE_CB_AMOUNT + 1)
         b59 = update_block(59, [tx])
         yield rejected(RejectResult(16, b'bad-txns-in-belowout'))
 

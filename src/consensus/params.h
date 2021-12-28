@@ -6,6 +6,7 @@
 #ifndef BITCOIN_CONSENSUS_PARAMS_H
 #define BITCOIN_CONSENSUS_PARAMS_H
 
+#include "amount.h"
 #include "uint256.h"
 #include "script/script.h"
 #include <map>
@@ -77,7 +78,15 @@ struct Params {
     /** default address for mining */
     CScript     moneyBoxAddress;
 
-    CScript     graveAddress;
+    /** address for burn coins */
+    std::vector<std::pair<CScript, double> >   graveAddresses;
+
+    /** CA certificates created after this lock are invalid */
+    uint32_t    maxCaBlock;
+    /** reduction of default fee */
+    int         defaultFeeReductionBlock;
+    /** total money supply */
+    CAmount     maxTotalAmount;
 };
 
 } // namespace Consensus

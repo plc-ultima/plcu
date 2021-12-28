@@ -10,7 +10,7 @@ import os
 import shutil
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, assert_raises_rpc_error
+from test_framework.util import *
 
 class MultiWalletTest(BitcoinTestFramework):
     def set_test_params(self):
@@ -56,7 +56,7 @@ class MultiWalletTest(BitcoinTestFramework):
 
         # check w1 wallet balance
         w1_info = w1.getwalletinfo()
-        assert_equal(w1_info['immature_balance'], 6000000)
+        assert_equal(w1_info['immature_balance'], BASE_CB_AMOUNT)
         w1_name = w1_info['walletname']
         assert_equal(w1_name, "w1")
 
@@ -72,7 +72,7 @@ class MultiWalletTest(BitcoinTestFramework):
         assert_equal({"w1", "w2", "w3"}, {w1_name, w2_name, w3_name})
 
         w1.generate(101)
-        assert_equal(w1.getbalance(), 12000000)
+        assert_equal(w1.getbalance(), 2 * BASE_CB_AMOUNT)
         assert_equal(w2.getbalance(), 0)
         assert_equal(w3.getbalance(), 0)
 

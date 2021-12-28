@@ -44,13 +44,13 @@ static const unsigned int DEFAULT_KEYPOOL_SIZE = 1000;
 //! -paytxfee default
 static const CAmount DEFAULT_TRANSACTION_FEE = 0;
 //! -fallbackfee default
-static const CAmount DEFAULT_FALLBACK_FEE = 2000000;
+static const CAmount DEFAULT_FALLBACK_FEE = 20000;
 //! -m_discard_rate default
-static const CAmount DEFAULT_DISCARD_FEE = 10000;
+static const CAmount DEFAULT_DISCARD_FEE = 100;
 //! -mintxfee default
-static const CAmount DEFAULT_TRANSACTION_MINFEE = 100000;
+static const CAmount DEFAULT_TRANSACTION_MINFEE = 1000;
 //! minimum recommended increment for BIP 125 replacement txs
-static const CAmount WALLET_INCREMENTAL_RELAY_FEE = 5000;
+static const CAmount WALLET_INCREMENTAL_RELAY_FEE = 50;
 //! target minimum change amount
 static const CAmount MIN_CHANGE = CENT;
 //! final minimum change amount after paying for fees
@@ -489,6 +489,10 @@ public:
         outpoint = COutPoint(walletTx->GetHash(), i);
         txout = walletTx->tx->vout[i];
     }
+    CInputCoin(const COutPoint & outp, const CTxOut & outo)
+        : outpoint(outp)
+        , txout(outo)
+    {}
 
     COutPoint outpoint;
     CTxOut txout;
@@ -677,6 +681,12 @@ private:
     int64_t nLastResend;
     bool fBroadcastTransactions;
 
+    // taxfree cert
+    std::string                   m_taxfreeCertFileName;
+    std::vector<CPubKey>          m_taxfreePubkeys;
+    std::vector<plc::Certificate> m_taxfreeCerts;
+
+
     /**
      * Used to keep track of spent outpoints, and
      * detect and report conflicts (double-spends or
@@ -748,6 +758,11 @@ public:
         }
     }
 
+    std::string GetTaxFreeCertFileName() const
+    {
+        return m_taxfreeCertFileName;
+    }
+
     void LoadKeyPool(int64_t nIndex, const CKeyPool &keypool);
 
     // Map from Key ID (for regular keys) or Script ID (for watch-only keys) to
@@ -759,40 +774,14 @@ public:
     unsigned int nMasterKeyMaxID;
 
     // Create wallet with dummy database handle
-    CWallet(): dbw(new CWalletDBWrapper())
-    {
-        SetNull();
-    }
+    CWallet();
 
     // Create wallet with passed-in database handle
-    CWallet(std::unique_ptr<CWalletDBWrapper> dbw_in) : dbw(std::move(dbw_in))
-    {
-        SetNull();
-    }
+    CWallet(std::unique_ptr<CWalletDBWrapper> dbw_in);
 
-    ~CWallet()
-    {
-        delete pwalletdbEncryption;
-        pwalletdbEncryption = nullptr;
-    }
+    ~CWallet();
 
-    void SetNull()
-    {
-        nWalletVersion = FEATURE_BASE;
-        nWalletMaxVersion = FEATURE_BASE;
-        nMasterKeyMaxID = 0;
-        pwalletdbEncryption = nullptr;
-        nOrderPosNext = 0;
-        nAccountingEntryNumber = 0;
-        nNextResend = 0;
-        nLastResend = 0;
-        m_max_keypool_index = 0;
-        nTimeFirstKey = 0;
-        fBroadcastTransactions = false;
-        nRelockTime = 0;
-        fAbortRescan = false;
-        fScanningWallet = false;
-    }
+    void SetNull();
 
     std::map<uint256, CWalletTx> mapWallet;
     std::list<CAccountingEntry> laccentries;

@@ -54,7 +54,8 @@ enum txnouttype
     TX_NULL_DATA,
     TX_WITNESS_V0_SCRIPTHASH,
     TX_WITNESS_V0_KEYHASH,
-    TX_AB_MINTING
+    TX_AB_MINTING,
+    TX_SUPER
 };
 
 class CNoDestination {
@@ -84,8 +85,12 @@ bool ExtractDestination(const CScript& scriptPubKey, CTxDestination& addressRet)
 bool ExtractDestination(const CScript& scriptPubKey, CTxDestination& addressRet, uint32_t & lockTimeRet);
 bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<CTxDestination>& addressRet, int& nRequiredRet);
 bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<CTxDestination>& addressRet, int& nRequiredRet, uint32_t & lockTimeRet);
+
 bool isMintingTx(const CTransaction & tx);
 bool isMintingScript(const CScript & scriptSig, std::vector<plc::Certificate> & certs);
+bool isSuperTx(const CTransaction & tx);
+
+CScript makeSuperTxScriptPubKey();
 
 CScript GetScriptForDestination(const CTxDestination& dest);
 CScript GetScriptForRawPubKey(const CPubKey& pubkey);

@@ -246,7 +246,7 @@ class CECKey(object):
         len = ssl.BN_bn2bin(bn, mb)
         assert (len >= 0 and len <= 32)
         buffer = b'\0' * (32 - len) + mb.raw
-        return buffer[0:32]
+        return buffer[0:32] + (b'\1' if self.is_compressed() else b'')
 
 
 class CPubKey(bytes):
@@ -381,3 +381,13 @@ def recover_public_key(digest, signature, compressed = True):
     pubkey.set_pubkey(key_uncompressed)
     pubkey.set_compressed(True)
     return pubkey.get_pubkey()
+
+
+def create_key(compressed=True, secret_bytes=None):
+    secret_bytes = secret_bytes if secret_bytes else open("/dev/urandom", "rb").read(32)
+    assert (len(secret_bytes) >= 32)
+    key = CECKey()
+    key.set_secretbytes(secret_bytes[:32])
+    if key.is_compressed() != compressed:
+        key.set_compressed(compressed)
+    return key

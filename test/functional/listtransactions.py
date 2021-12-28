@@ -27,10 +27,11 @@ class ListTransactionsTest(BitcoinTestFramework):
         self.sync_all()
 
         # Simple send, 0 to 1:
-        txid = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 0.1)
+        address = self.nodes[1].getnewaddress()
+        txid = self.nodes[0].sendtoaddress(address, 0.1)
         self.sync_all()
         assert_array_result(self.nodes[0].listtransactions(),
-                           {"txid":txid},
+                           {"txid":txid, "address":address},
                            {"category":"send","account":"","amount":Decimal("-0.1"),"confirmations":0})
         assert_array_result(self.nodes[1].listtransactions(),
                            {"txid":txid},
@@ -39,16 +40,17 @@ class ListTransactionsTest(BitcoinTestFramework):
         self.nodes[0].generate(1)
         self.sync_all()
         assert_array_result(self.nodes[0].listtransactions(),
-                           {"txid":txid},
+                           {"txid":txid, "address":address},
                            {"category":"send","account":"","amount":Decimal("-0.1"),"confirmations":1})
         assert_array_result(self.nodes[1].listtransactions(),
                            {"txid":txid},
                            {"category":"receive","account":"","amount":Decimal("0.1"),"confirmations":1})
 
         # send-to-self:
-        txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 0.2)
+        address = self.nodes[0].getnewaddress()
+        txid = self.nodes[0].sendtoaddress(address, 0.2)
         assert_array_result(self.nodes[0].listtransactions(),
-                           {"txid":txid, "category":"send"},
+                           {"txid":txid, "address":address, "category":"send"},
                            {"amount":Decimal("-0.2")})
         assert_array_result(self.nodes[0].listtransactions(),
                            {"txid":txid, "category":"receive"},

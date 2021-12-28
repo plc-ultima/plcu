@@ -78,7 +78,7 @@ class InvalidBlockRequestTest(ComparisonTestFramework):
 
         # b'0x51' is OP_TRUE
         tx1 = create_transaction(self.block1.vtx[0], 0, b'\x51', 50 * COIN)
-        tx2 = create_transaction(tx1, 0, b'\x51', 50 * COIN)
+        tx2 = create_transaction(tx1, 0, b'\x51', 45 * COIN)
 
         block2.vtx.extend([tx1, tx2])
         block2.hashMerkleRoot = block2.calc_merkle_root()

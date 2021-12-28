@@ -22,15 +22,16 @@ const char* GetTxnOutputType(txnouttype t)
 {
     switch (t)
     {
-    case TX_NONSTANDARD: return "nonstandard";
-    case TX_PUBKEY: return "pubkey";
-    case TX_PUBKEYHASH: return "pubkeyhash";
-    case TX_SCRIPTHASH: return "scripthash";
-    case TX_MULTISIG: return "multisig";
-    case TX_NULL_DATA: return "nulldata";
-    case TX_WITNESS_V0_KEYHASH: return "witness_v0_keyhash";
-    case TX_WITNESS_V0_SCRIPTHASH: return "witness_v0_scripthash";
-    case TX_AB_MINTING: return "ab_minting";
+        case TX_NONSTANDARD: return "nonstandard";
+        case TX_PUBKEY: return "pubkey";
+        case TX_PUBKEYHASH: return "pubkeyhash";
+        case TX_SCRIPTHASH: return "scripthash";
+        case TX_MULTISIG: return "multisig";
+        case TX_NULL_DATA: return "nulldata";
+        case TX_WITNESS_V0_KEYHASH: return "witness_v0_keyhash";
+        case TX_WITNESS_V0_SCRIPTHASH: return "witness_v0_scripthash";
+        case TX_AB_MINTING: return "ab_minting";
+        case TX_SUPER: return "super";
     }
     return nullptr;
 }
@@ -78,6 +79,9 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
                                          << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY
                                          << OP_2 << OP_CHECKMULTISIG
                                          << OP_ENDIF));
+
+        // super tx
+        mTemplates.insert(std::make_pair(TX_SUPER, CScript() << OP_CHECKSUPER));
     }
 
     vSolutionsRet.clear();
@@ -372,6 +376,8 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::
     return true;
 }
 
+//******************************************************************************
+//******************************************************************************
 bool isMintingTx(const CTransaction & tx)
 {
     for (const CTxIn & in : tx.vin)
@@ -386,7 +392,11 @@ bool isMintingTx(const CTransaction & tx)
     return false;
 }
 
-bool isMintingScript(const CScript & scriptSig, std::vector<plc::Certificate> & certs)
+//******************************************************************************
+//******************************************************************************
+bool isCorrectPlcSignature(const CScript & scriptSig,
+                           const CScript & innerScript,
+                           std::vector<plc::Certificate> & certs)
 {
     // script must be pushOnly
     // format
@@ -400,21 +410,8 @@ bool isMintingScript(const CScript & scriptSig, std::vector<plc::Certificate> & 
     }
 
     // vector<opcode, data>
-    std::vector<std::pair<opcodetype, std::vector<unsigned char> > > ops;
-
-    {
-        // parse script
-        opcodetype op;
-        CScript::const_iterator it = scriptSig.begin();
-        std::vector<unsigned char> data;
-
-        while (scriptSig.GetOp(it, op, data))
-        {
-            ops.emplace_back(op, data);
-        }
-    }
-
-    if (ops.size() < 7)
+    CScript::Ops ops;
+    if (!scriptSig.parse(ops) || ops.size() < 7)
     {
         return false;
     }
@@ -460,7 +457,7 @@ bool isMintingScript(const CScript & scriptSig, std::vector<plc::Certificate> & 
         certs.emplace_back(cert);
     }
 
-    if (ops[i].second.size() != 1 || ops[i].second[0] != OP_CHECKREWARD)
+    if (!std::equal(ops[i].second.begin(), ops[i].second.end(), innerScript.begin()))
     {
         return false;
     }
@@ -468,6 +465,65 @@ bool isMintingScript(const CScript & scriptSig, std::vector<plc::Certificate> & 
     return true;
 }
 
+//******************************************************************************
+//******************************************************************************
+bool isMintingScript(const CScript & scriptSig, std::vector<plc::Certificate> & certs)
+{
+    return isCorrectPlcSignature(scriptSig, CScript(OP_CHECKREWARD), certs);
+}
+
+//******************************************************************************
+//******************************************************************************
+bool isInputSuperSigned(const CTxIn & txin)
+{
+    if (txin.prevout.hash != uint256() || txin.prevout.n != 0)
+    {
+        return false;
+    }
+
+    if (txin.scriptSig.empty())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool isValidSuperSignatureFormat(const CScript & scriptSig)
+{
+    std::vector<plc::Certificate> certs;
+    return isCorrectPlcSignature(scriptSig, CScript(OP_CHECKSUPER), certs);
+}
+
+//******************************************************************************
+//******************************************************************************
+bool isSuperTx(const CTransaction & tx)
+{
+    for (const CTxIn & in : tx.vin)
+    {
+        if (isInputSuperSigned(in) && isValidSuperSignatureFormat(in.scriptSig))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+//******************************************************************************
+//******************************************************************************
+CScript makeSuperTxScriptPubKey()
+{
+    CScript scr(OP_CHECKSUPER);
+    CScriptID id(scr);
+    CScript result;
+    result << OP_HASH160 << ToByteVector(id) << OP_EQUAL;
+    return result;
+}
+
+//******************************************************************************
+//******************************************************************************
 namespace
 {
 class CScriptVisitor : public boost::static_visitor<bool>

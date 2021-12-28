@@ -15,8 +15,8 @@ RPCs tested are:
 
 from decimal import Decimal
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, BurnedAndChangeAmount
-from test_framework.script import AddressFromPubkey, GraveAddress
+from test_framework.util import *
+from test_framework.script import AddressFromPubkey
 
 
 class WalletAccountsTest(BitcoinTestFramework):
@@ -31,14 +31,13 @@ class WalletAccountsTest(BitcoinTestFramework):
         assert_equal(len(node.listunspent()), 0)
 
         # Note each time we call generate, all generated coins go into
-        # the same address, so we call twice to get two addresses with base_amount each
+        # the same address, so we call twice to get two addresses with BASE_CB_AMOUNT each
         node.generate(1)
         node.generate(101)
-        BASE_CB_AMOUNT = Decimal(5000)
         assert_equal(node.getbalance(), BASE_CB_AMOUNT * 2)
 
         # there should be 2 address groups
-        # each with 1 address with a balance of base_amount PLCU
+        # each with 1 address with a balance of BASE_CB_AMOUNT PLCU
         address_groups = node.listaddressgroupings()
         assert_equal(len(address_groups), 2)
         # the addresses aren't linked now, but will be after we send to the
@@ -50,16 +49,18 @@ class WalletAccountsTest(BitcoinTestFramework):
             assert_equal(address_group[0][1], BASE_CB_AMOUNT)
             linked_addresses.add(address_group[0][0])
 
-        # send base_amount from each address to a third address not in this wallet
+        # send BASE_CB_AMOUNT from each address to a third address not in this wallet
         # There's some fee that will come back to us when the miner reward
         # matures.
         common_address = AddressFromPubkey(b'pubkey56')
         amount = BASE_CB_AMOUNT*2
-        (burned, rest) = BurnedAndChangeAmount(amount, 0)
-        self.log.debug(f'will send: common_address: {amount-burned}, grave: {burned}')
+        (burn1, burn2, rest) = BurnedAndChangeAmount(amount)
+        rest -= ToCoins(2)  # lets take extra 1 satoshi per each burn output due to rounding/truncation
+        utxos = node.listunspent()
+        self.log.debug(f'will send: common_address: {common_address}, amount: {amount}, rest: {rest}, burn1: {burn1}, burn2: {burn2}, balance: {node.getbalance()}, utxos ({len(utxos)}): {utxos}')
         txid = node.sendmany(
             fromaccount="",
-            amounts={common_address: rest, GraveAddress(): burned},
+            amounts={common_address: rest},
             subtractfeefrom=[common_address],
             minconf=1,
         )

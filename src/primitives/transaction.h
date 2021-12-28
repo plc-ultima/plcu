@@ -14,6 +14,11 @@
 
 static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
 
+enum TxInMarkerType
+{
+    supertransaction = 0,
+};
+
 /** An outpoint - a combination of a transaction hash and an index n into its vout */
 class COutPoint
 {
@@ -34,6 +39,8 @@ public:
 
     void SetNull() { hash.SetNull(); n = (uint32_t) -1; }
     bool IsNull() const { return (hash.IsNull() && n == (uint32_t) -1); }
+
+    bool isMarker(const TxInMarkerType type) const { return hash == uint256() && n == type; };
 
     friend bool operator<(const COutPoint& a, const COutPoint& b)
     {

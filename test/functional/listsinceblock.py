@@ -5,7 +5,7 @@
 """Test the listsincelast RPC."""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, assert_array_result, assert_raises_rpc_error
+from test_framework.util import *
 
 class ListSinceBlockTest (BitcoinTestFramework):
     def set_test_params(self):
@@ -148,10 +148,12 @@ class ListSinceBlockTest (BitcoinTestFramework):
         self.nodes[1].importprivkey(privkey)
 
         # send from nodes[1] using utxo to nodes[0]
-        change = '%.8f' % (float(utxo['amount']) - 1.0003)
+        (burn1, burn2, change) = BurnedAndChangeAmount(utxo['amount'] - Decimal('0.0003'), Decimal(1))
         recipientDict = {
             self.nodes[0].getnewaddress(): 1,
             self.nodes[1].getnewaddress(): change,
+            GRAVE_ADDRESS_1: burn1,
+            GRAVE_ADDRESS_2: burn2,
         }
         utxoDicts = [{
             'txid': utxo['txid'],
@@ -165,6 +167,8 @@ class ListSinceBlockTest (BitcoinTestFramework):
         recipientDict2 = {
             self.nodes[3].getnewaddress(): 1,
             self.nodes[2].getnewaddress(): change,
+            GRAVE_ADDRESS_1: burn1,
+            GRAVE_ADDRESS_2: burn2,
         }
         self.nodes[2].sendrawtransaction(
             self.nodes[2].signrawtransaction(
@@ -223,10 +227,12 @@ class ListSinceBlockTest (BitcoinTestFramework):
         # create and sign a transaction
         utxos = self.nodes[2].listunspent()
         utxo = utxos[0]
-        change = '%.8f' % (float(utxo['amount']) - 1.0003)
+        (burn1, burn2, change) = BurnedAndChangeAmount(utxo['amount'] - Decimal('0.0003'), Decimal(1))
         recipientDict = {
             self.nodes[0].getnewaddress(): 1,
             self.nodes[2].getnewaddress(): change,
+            GRAVE_ADDRESS_1: burn1,
+            GRAVE_ADDRESS_2: burn2,
         }
         utxoDicts = [{
             'txid': utxo['txid'],

@@ -20,6 +20,7 @@ Tests correspond to code in rpc/blockchain.cpp.
 from decimal import Decimal
 import http.client
 import subprocess
+from test_framework.util import *
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
@@ -55,8 +56,7 @@ class BlockchainTest(BitcoinTestFramework):
     def _test_gettxoutsetinfo(self):
         node = self.nodes[0]
         res = node.gettxoutsetinfo()
-
-        assert_equal(res['total_amount'], 6000000 * 100 + 10 * 10 * 100 + Decimal('0.005') * 100)
+        assert_equal(res['total_amount'], BASE_CB_AMOUNT * 100 + 100 * 10 * 100 + Decimal('0.005') * 100)
         assert_equal(res['transactions'], 200)
         assert_equal(res['height'], 200)
         assert_equal(res['txouts'], 11*100 + 100)

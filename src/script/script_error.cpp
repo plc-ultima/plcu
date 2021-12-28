@@ -137,6 +137,8 @@ const char* ScriptErrorString(const ScriptError serror)
             return "Missing required output in transaction";
         case SCRIPT_ERR_BIG_FEE:
             return "Big fee";
+        case SCRIPT_ERR_INVALID_LOCKTIME:
+            return "Invalid locktime";
         case SCRIPT_ERR_UNKNOWN_ERROR:
         case SCRIPT_ERR_ERROR_COUNT:
         default: break;

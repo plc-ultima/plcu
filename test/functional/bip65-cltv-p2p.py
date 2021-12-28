@@ -53,7 +53,8 @@ def cltv_validate(node, tx, height):
 def create_transaction(node, coinbase, to_address, amount):
     from_txid = node.getblock(coinbase)['tx'][0]
     inputs = [{ "txid" : from_txid, "vout" : 0}]
-    outputs = { to_address : amount }
+    (burn1, burn2, rest) = BurnedAndChangeAmount(amount)
+    outputs = { to_address : rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2 }
     rawtx = node.createrawtransaction(inputs, outputs)
     signresult = node.signrawtransaction(rawtx)
     tx = CTransaction()
@@ -83,7 +84,7 @@ class BIP65Test(BitcoinTestFramework):
         self.log.info("Test that an invalid-according-to-CLTV transaction can still appear in a block")
 
         spendtx = create_transaction(self.nodes[0], self.coinbase_blocks[0],
-                self.nodeaddress, 1.0)
+                self.nodeaddress, Decimal(1))
         cltv_invalidate(spendtx)
         spendtx.rehash()
 
@@ -118,7 +119,7 @@ class BIP65Test(BitcoinTestFramework):
         block.nVersion = VB_TOP_BITS
 
         spendtx = create_transaction(self.nodes[0], self.coinbase_blocks[1],
-                self.nodeaddress, 1.0)
+                self.nodeaddress, Decimal(1))
         cltv_invalidate(spendtx)
         spendtx.rehash()
 

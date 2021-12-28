@@ -127,6 +127,11 @@ unsigned int GetP2SHSigOpCount(const CTransaction& tx, const CCoinsViewCache& in
     unsigned int nSigOps = 0;
     for (unsigned int i = 0; i < tx.vin.size(); i++)
     {
+        if (tx.vin[i].prevout.isMarker(supertransaction))
+        {
+            // TODO no sigops? or 1?
+            continue;
+        }
         const Coin& coin = inputs.AccessCoin(tx.vin[i].prevout);
         assert(!coin.IsSpent());
         const CTxOut &prevout = coin.out;
@@ -149,6 +154,10 @@ int64_t GetTransactionSigOpCost(const CTransaction& tx, const CCoinsViewCache& i
 
     for (unsigned int i = 0; i < tx.vin.size(); i++)
     {
+        if (tx.vin[i].prevout.isMarker(supertransaction))
+        {
+            continue;
+        }
         const Coin& coin = inputs.AccessCoin(tx.vin[i].prevout);
         assert(!coin.IsSpent());
         const CTxOut &prevout = coin.out;
@@ -231,6 +240,11 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
         for (unsigned int i = 0; i < tx.vin.size(); i++)
         {
             const COutPoint &prevout = tx.vin[i].prevout;
+            if (prevout.isMarker(supertransaction))
+            {
+                continue;
+            }
+
             const Coin& coin = inputs.AccessCoin(prevout);
             assert(!coin.IsSpent());
 

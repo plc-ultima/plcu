@@ -19,8 +19,6 @@ from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework import blocktools
 from test_framework.mininode import CTransaction
 from test_framework.util import *
-from test_framework.script import GraveAddress
-
 import io
 
 # Sequence number that is BIP 125 opt-in and BIP 68-compliant
@@ -107,7 +105,7 @@ def test_segwit_bumpfee_succeeds(rbf_node, dest_address):
     segwit_in = next(u for u in rbf_node.listunspent() if u["amount"] == Decimal("0.1"))
     segwit_out = rbf_node.validateaddress(rbf_node.getnewaddress())
     rbf_node.addwitnessaddress(segwit_out["address"])
-    (burned, change) = BurnedAndChangeAmount(Decimal("0.09"), 0)
+    (burn1, burn2, change) = BurnedAndChangeAmount(Decimal("0.09"))
     segwitid = send_to_witness(
         use_p2wsh=False,
         node=rbf_node,
@@ -115,17 +113,19 @@ def test_segwit_bumpfee_succeeds(rbf_node, dest_address):
         pubkey=segwit_out["pubkey"],
         encode_p2sh=False,
         amount=change,
-        burned=burned,
+        burn1=burn1,
+        burn2=burn2,
         sign=True)
 
-    (burned, change) = BurnedAndChangeAmount(Decimal("0.08"), Decimal("0.05"))
+    (burn1, burn2, change) = BurnedAndChangeAmount(Decimal("0.08"), Decimal("0.05"))
     rbfraw = rbf_node.createrawtransaction([{
         'txid': segwitid,
         'vout': 0,
         "sequence": BIP125_SEQUENCE_NUMBER
     }], {dest_address: Decimal("0.05"),
          rbf_node.getrawchangeaddress(): change,
-         GraveAddress(): burned})
+         GRAVE_ADDRESS_1: burn1,
+         GRAVE_ADDRESS_2: burn2})
     rbfsigned = rbf_node.signrawtransaction(rbfraw)
     rbfid = rbf_node.sendrawtransaction(rbfsigned["hex"])
     assert_in(rbfid, rbf_node.getrawmempool())
@@ -158,8 +158,8 @@ def test_notmine_bumpfee_fails(rbf_node, peer_node, dest_address):
     signedtx = rbf_node.signrawtransaction(rawtx)
     signedtx = peer_node.signrawtransaction(signedtx["hex"])
     assert_raises_rpc_error(-26, 'bad-burned', rbf_node.sendrawtransaction, signedtx["hex"])
-    (burned, rest) = BurnedAndChangeAmount(output_val, 0)
-    rawtx = rbf_node.createrawtransaction(inputs, {dest_address: rest, GraveAddress(): burned})
+    (burn1, burn2, rest) = BurnedAndChangeAmount(output_val)
+    rawtx = rbf_node.createrawtransaction(inputs, {dest_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
     signedtx = rbf_node.signrawtransaction(rawtx)
     signedtx = peer_node.signrawtransaction(signedtx["hex"])
     rbfid = rbf_node.sendrawtransaction(signedtx["hex"])
@@ -171,8 +171,8 @@ def test_bumpfee_with_descendant_fails(rbf_node, rbf_node_address, dest_address)
     # cannot bump fee if the transaction has a descendant
     # parent is send-to-self, so we don't have to check which output is change when creating the child tx
     parent_id = spend_one_input(rbf_node, rbf_node_address)
-    (burned, rest) = BurnedAndChangeAmount(Decimal('0.020000'), 0)
-    tx = rbf_node.createrawtransaction([{"txid": parent_id, "vout": 0}], {dest_address: rest, GraveAddress(): burned})
+    (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('0.020000'))
+    tx = rbf_node.createrawtransaction([{"txid": parent_id, "vout": 0}], {dest_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
     tx = rbf_node.signrawtransaction(tx)
     txid = rbf_node.sendrawtransaction(tx["hex"])
     assert_raises_rpc_error(-8, "Transaction has descendants in the wallet", rbf_node.bumpfee, parent_id)
@@ -182,7 +182,7 @@ def test_small_output_fails(rbf_node, dest_address):
     # cannot bump fee with a too-small output
     amount = Decimal("0.100000")
     fee = Decimal("0.001000")
-    (_, change) = BurnedAndChangeAmount(amount - fee, amount / 2)
+    (_, _, change) = BurnedAndChangeAmount(amount - fee, amount / 2)
     new_fee = ToSatoshi(change) + ToSatoshi(fee)
     rbfid = spend_one_input(rbf_node, dest_address)
     rbf_node.bumpfee(rbfid, {"totalFee": new_fee})
@@ -195,15 +195,16 @@ def test_dust_to_fee(rbf_node, dest_address):
     # the bumped tx sets fee=49,900, but it converts to 50,000
     amount = Decimal("0.100000")
     fee = Decimal("0.001000")
-    (_, change) = BurnedAndChangeAmount(amount - fee, amount / 2)
+    (_, _, change) = BurnedAndChangeAmount(amount - fee, amount / 2)
     new_fee = ToSatoshi(change) + ToSatoshi(fee)
     rbfid = spend_one_input(rbf_node, dest_address)
     fulltx = rbf_node.getrawtransaction(rbfid, 1)
-    bumped_tx = rbf_node.bumpfee(rbfid, {"totalFee": new_fee - 10000})
+    bumped_tx = rbf_node.bumpfee(rbfid, {"totalFee": new_fee - 100})
     full_bumped_tx = rbf_node.getrawtransaction(bumped_tx["txid"], 1)
     assert_equal(bumped_tx["fee"], ToCoins(new_fee))
-    assert_equal(len(fulltx["vout"]), 3)
-    assert_equal(len(full_bumped_tx["vout"]), 2)  #change output is eliminated
+    burn_outputs = 2
+    assert_equal(len(fulltx["vout"]), 2 + burn_outputs)
+    assert_equal(len(full_bumped_tx["vout"]), 1 + burn_outputs)  #change output is eliminated
 
 
 def test_settxfee(rbf_node, dest_address):
@@ -289,7 +290,7 @@ def test_locked_wallet_fails(rbf_node, dest_address):
 def spend_one_input(node, dest_address):
     amount = Decimal("0.100000")
     fee = Decimal("0.001000")
-    (burned, change) = BurnedAndChangeAmount(amount - fee, amount / 2)
+    (burn1, burn2, change) = BurnedAndChangeAmount(amount - fee, amount / 2)
     tx_input = dict(
         sequence=BIP125_SEQUENCE_NUMBER, **next(u for u in node.listunspent() if u["amount"] == amount))
     rawtx_bad = node.createrawtransaction(
@@ -300,7 +301,8 @@ def spend_one_input(node, dest_address):
     rawtx = node.createrawtransaction(
         [tx_input], {dest_address: amount / 2,
                      node.getrawchangeaddress(): change,
-                     GraveAddress(): burned})
+                     GRAVE_ADDRESS_1: burn1,
+                     GRAVE_ADDRESS_2: burn2})
     signedtx = node.signrawtransaction(rawtx)
     txid = node.sendrawtransaction(signedtx["hex"])
     assert_in(txid, node.getrawmempool())

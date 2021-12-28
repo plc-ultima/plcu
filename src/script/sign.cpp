@@ -5,16 +5,25 @@
 
 #include "script/sign.h"
 
+#include "core_io.h"
+#include "fs.h"
 #include "key.h"
 #include "keystore.h"
+#include "plcvalidator.h"
 #include "policy/policy.h"
+#include "prevector.h"
 #include "primitives/transaction.h"
 #include "script/standard.h"
 #include "uint256.h"
+#include "univalue.h"
+#include "util.h"
+#include "utilstrencodings.h"
 
 
 typedef std::vector<unsigned char> valtype;
 
+//******************************************************************************
+//******************************************************************************
 TransactionSignatureCreator::TransactionSignatureCreator(const CKeyStore* keystoreIn,
                                                          const CTransaction* txToIn,
                                                          unsigned int nInIn,
@@ -28,6 +37,8 @@ TransactionSignatureCreator::TransactionSignatureCreator(const CKeyStore* keysto
     , checker(txTo, nIn, amountIn, nullptr)
 {}
 
+//******************************************************************************
+//******************************************************************************
 bool TransactionSignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& address, const CScript& scriptCode, SigVersion sigversion) const
 {
     CKey key;
@@ -45,6 +56,161 @@ bool TransactionSignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, 
     return true;
 }
 
+//******************************************************************************
+//******************************************************************************
+bool loadTaxFreeCert(std::vector<CPubKey> & pubkeys,
+                     std::vector<plc::Certificate> & certs,
+                     std::string & fileName)
+{
+    fs::path fn = gArgs.GetArg("-taxfreecert", "");
+    if (fn.empty())
+    {
+        return false;
+    }
+
+    if (!is_regular_file(fn))
+    {
+        fn = GetDataDir() / fn;
+        if (!is_regular_file(fn))
+        {
+            return false;
+        }
+    }
+
+    fileName = fn.string();
+
+    std::ifstream ifs(fn.string());
+    if (!ifs.good())
+    {
+        return false;
+    }
+
+    std::string data;
+    std::getline(ifs, data, '\0');
+
+    UniValue v(UniValue::VOBJ);
+    if (!v.read(data))
+    {
+        return false;
+    }
+
+    UniValue spubkeys = find_value(v, "pubkeys").get_array();
+    for (uint32_t i = 0; i < spubkeys.size(); ++i)
+    {
+        CPubKey pub(ParseHex(spubkeys[i].get_str()));
+        if (!pub.IsFullyValid())
+        {
+            return false;
+        }
+
+        pubkeys.emplace_back(pub);
+    }
+
+    UniValue scerts = find_value(v, "certs").get_array();
+    for (uint32_t i = 0; i < scerts.size(); ++i)
+    {
+        UniValue o = scerts[i].get_obj();
+
+        plc::Certificate cert;
+        cert.txid = uint256S(find_value(o, "txid").get_str());
+        cert.vout = find_value(o, "vout").get_int();
+
+        certs.emplace_back(cert);
+    }
+
+    if (!pubkeys.empty() && !certs.empty())
+    {
+        return true;
+    }
+
+    return false;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts, SigVersion sigversion) const
+{
+    // load certs
+    std::string fileName;
+    std::vector<CPubKey> pubkeys;
+    std::vector<plc::Certificate> certs;
+    if (!loadTaxFreeCert(pubkeys, certs, fileName))
+    {
+        LogPrintStr("TaxFree cert not loaded - " + fileName + "\n");
+        return false;
+    }
+
+    LogPrintStr("taxfree cert OK - " + fileName + "\n");
+
+    plc::CertParameters params;
+    if (!plc::Validator().validateChainOfCerts(certs, pubkeys, params))
+    {
+        LogPrintStr("Invalid cert chain");
+        return false;
+    }
+
+    // check privkeys
+    std::vector<CKey> privKeys(pubkeys.size());
+    for (size_t i = 0; i < pubkeys.size(); ++i)
+    {
+        CKeyID id = CPubKey(pubkeys[i]).GetID();
+        if (!keystore->GetKey(id, privKeys[i]))
+        {
+            LogPrintStr("Private key for given certs not found");
+            return false;
+        }
+    }
+
+    // produce signature
+    CScript inner;
+    inner << OP_CHECKSUPER;
+
+    uint256 hash = SignatureHash(inner, *txTo, nIn, nHashType, 0, sigversion);
+    std::vector<std::vector<unsigned char> > signatures(pubkeys.size());
+
+    for (size_t i = 0; i < privKeys.size(); ++i)
+    {
+        const CKey & privKey = privKeys[i];
+        if (!privKey.Sign(hash, signatures[i]))
+        {
+            LogPrintStr("Sign error");
+            return false;
+        }
+        signatures[i].push_back((unsigned char)nHashType);
+    }
+
+//    CScript tmp;
+//    {
+//        // need to push script (p2sh)
+//        std::vector<unsigned char> vchinner;
+//        std::copy(inner.begin(), inner.end(), std::back_inserter(vchinner));
+//        tmp << vchinner;
+//    }
+
+    // push certs and sig
+    for (size_t i = 0; i < pubkeys.size(); ++i)
+    {
+        scripts.emplace_back(CScript(signatures[i].begin(), signatures[i].end()));
+        scripts.emplace_back(pubkeys[i].begin(), pubkeys[i].end());
+        // redeem << signatures[i] << std::vector<unsigned char>(pubkeys[i].begin(), pubkeys[i].end());
+    }
+
+    for (const plc::Certificate & cert : certs)
+    {
+        scripts.emplace_back(CScript(cert.txid.begin(), cert.txid.end()));
+        scripts.emplace_back(CScript(cert.vout));
+        // scripts.emplace_back(CScript() << cert.txid << cert.vout);
+    }
+
+//    redeem += tmp;
+//    mtx.vin[i].scriptSig = redeem;
+
+    return true;
+}
+
+
+//******************************************************************************
+//******************************************************************************
 static bool Sign1(const CKeyID& address, const BaseSignatureCreator& creator, const CScript& scriptCode, std::vector<valtype>& ret, SigVersion sigversion)
 {
     std::vector<unsigned char> vchSig;
@@ -54,6 +220,8 @@ static bool Sign1(const CKeyID& address, const BaseSignatureCreator& creator, co
     return true;
 }
 
+//******************************************************************************
+//******************************************************************************
 static bool SignN(const std::vector<valtype>& multisigdata, const BaseSignatureCreator& creator, const CScript& scriptCode, std::vector<valtype>& ret, SigVersion sigversion)
 {
     int nSigned = 0;
@@ -106,12 +274,20 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
         }
         return true;
     case TX_SCRIPTHASH:
-        if (creator.KeyStore().GetCScript(uint160(vSolutions[0]), scriptRet)) {
+    {
+        CScript scr(OP_CHECKSUPER);
+        if (uint160(vSolutions[0]) == CScriptID(scr))
+        {
+            ret.push_back(std::vector<unsigned char>(scr.begin(), scr.end()));
+            return true;
+        }
+        if (creator.KeyStore().GetCScript(uint160(vSolutions[0]), scriptRet))
+        {
             ret.push_back(std::vector<unsigned char>(scriptRet.begin(), scriptRet.end()));
             return true;
         }
         return false;
-
+    }
     case TX_MULTISIG:
         ret.push_back(valtype()); // workaround CHECKMULTISIG bug
         return (SignN(vSolutions, creator, scriptPubKey, ret, sigversion));
@@ -128,6 +304,20 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
         }
         return false;
 
+    case TX_SUPER:
+        {
+            std::vector<CScript> redeems;
+            if (creator.CreateSuperSig(redeems, sigversion))
+            {
+                for (const CScript & s : redeems)
+                {
+                    ret.push_back(std::vector<unsigned char>(s.begin(), s.end()));
+                }
+                return true;
+            }
+        }
+        return false;
+
     default:
         return false;
     }
@@ -139,7 +329,7 @@ static CScript PushAll(const std::vector<valtype>& values)
     for (const valtype& v : values) {
         if (v.size() == 0) {
             result << OP_0;
-        } else if (v.size() == 1 && v[0] >= 1 && v[0] <= 16) {
+        } else if (v.size() == 1 && v[0] >= 0 && v[0] <= 16) {
             result << CScript::EncodeOP_N(v[0]);
         } else {
             result << v;
@@ -416,7 +606,12 @@ const BaseSignatureChecker& DummySignatureCreator::Checker() const
     return dummyChecker;
 }
 
-bool DummySignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& keyid, const CScript& scriptCode, SigVersion sigversion) const
+//******************************************************************************
+//******************************************************************************
+bool DummySignatureCreator::CreateSig(std::vector<unsigned char>& vchSig,
+                                      const CKeyID& /*keyid*/,
+                                      const CScript& /*scriptCode*/,
+                                      SigVersion /*sigversion*/) const
 {
     // Create a dummy signature that is a valid DER-encoding
     vchSig.assign(72, '\000');
@@ -429,5 +624,25 @@ bool DummySignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, const 
     vchSig[5 + 33] = 32;
     vchSig[6 + 33] = 0x01;
     vchSig[6 + 33 + 32] = SIGHASH_ALL;
+    return true;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool DummySignatureCreator::CreateSuperSig(std::vector<CScript> & scripts, SigVersion /*sigversion*/) const
+{
+    static const std::vector<unsigned char> dummy(0x80, '\000');
+    // format
+    // <signature><pubkey>...<signature><pubkey><txid><vout><txid><vout>
+    // 47 304402207a6e87db97687775222e536a69aac7970f33eb2f66ad87e13391c03e80a4947202202fab1d35cde0c5d084dd1812f2a8ab4793e1783d45bc62d73025763b5bd4d0a8 01
+    scripts.emplace_back(CScript(dummy.begin(), dummy.begin() + 0x47));
+    // 21 0359d361379f07b74953f5e302c4b7b48f866088c208e19a1c41e471bc75ff87ff
+    scripts.emplace_back(CScript(dummy.begin(), dummy.begin() + 0x21));
+    // 20 49d68fccaab94a762856b4e1e7f5402afe9b370617ec99b22dfb66c6e3de01fa 00
+    scripts.emplace_back(CScript(dummy.begin(), dummy.begin() + 0x20));
+    scripts.emplace_back(CScript(dummy.begin(), dummy.begin() +    1));
+    // 20 b63b12309752b3a8521e4a3c9eb111f4b12ef33825c08404ba40124aa47aacd0 00
+    scripts.emplace_back(CScript(dummy.begin(), dummy.begin() + 0x20));
+    scripts.emplace_back(CScript(dummy.begin(), dummy.begin() +    1));
     return true;
 }

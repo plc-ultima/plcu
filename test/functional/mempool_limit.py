@@ -20,8 +20,12 @@ def create_lots_of_big_transactions2(node, txouts, utxos, num, fee):
         t = utxos.pop()
         inputs=[{ "txid" : t["txid"], "vout" : t["vout"]}]
         outputs = {}
-        change = t['amount'] - fee
-        outputs[addr] = satoshi_round(change)
+        if t['amount'] < fee + ToCoins(DUST_OUTPUT_THRESHOLD):
+            continue
+        (burn1, burn2, change) = BurnedAndChangeAmount(t['amount'] - fee)
+        outputs[addr] = change
+        outputs[GRAVE_ADDRESS_1] = burn1
+        outputs[GRAVE_ADDRESS_2] = burn2
         rawtx = node.createrawtransaction(inputs, outputs)
         newtx = rawtx[0:92]
         newtx = newtx + txouts
@@ -46,12 +50,13 @@ class MempoolLimitTest(BitcoinTestFramework):
         relayfee = self.nodes[0].getnetworkinfo()['relayfee']
 
         txids = []
-        utxos = create_confirmed_utxos(relayfee, self.nodes[0], 91)
+        utxos = create_confirmed_utxos(relayfee, self.nodes[0], 92)
 
         #create a mempool tx that will be evicted
         us0 = utxos.pop()
         inputs = [{ "txid" : us0["txid"], "vout" : us0["vout"]}]
-        outputs = {self.nodes[0].getnewaddress() : 0.01}
+        (burn1, burn2, rest) = BurnedAndChangeAmount(us0["amount"] - Decimal('0.001'))
+        outputs = {self.nodes[0].getnewaddress(): rest}
         tx = self.nodes[0].createrawtransaction(inputs, outputs)
         self.nodes[0].settxfee(relayfee) # specifically fund this tx with low fee
         txF = self.nodes[0].fundrawtransaction(tx)
@@ -59,16 +64,24 @@ class MempoolLimitTest(BitcoinTestFramework):
         txFS = self.nodes[0].signrawtransaction(txF['hex'])
         txid = self.nodes[0].sendrawtransaction(txFS['hex'])
 
+        # fundrawtransaction() above steals utxo from utxos, fix it:
+        inputs_used = []
+        tx_json = self.nodes[0].getrawtransaction(txid, 1)
+        for input in tx_json['vin']:
+            inputs_used.append((input['txid'], input['vout']))
+        utxos[:] = [x for x in utxos if (x['txid'], x['vout']) not in inputs_used]
+        assert_greater_than_or_equal(len(utxos), 90)
+
         relayfee = self.nodes[0].getnetworkinfo()['relayfee']
-        base_fee = relayfee*100
+        base_fee = relayfee*1000
         for i in range (3):
             txids.append([])
             txids[i] = create_lots_of_big_transactions2(self.nodes[0], txouts, utxos[30*i:30*i+30], 30, (i+1)*base_fee)
 
         # by now, the tx should be evicted, check confirmation state
-        assert(txid not in self.nodes[0].getrawmempool())
+        assert_not_in(txid, self.nodes[0].getrawmempool())
         txdata = self.nodes[0].gettransaction(txid)
-        assert(txdata['confirmations'] ==  0) #confirmation should still be 0
+        assert_equal(txdata['confirmations'], 0) #confirmation should still be 0
 
 if __name__ == '__main__':
     MempoolLimitTest().main()

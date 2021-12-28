@@ -28,6 +28,9 @@ public:
 
     /** Create a singular (non-script) signature. */
     virtual bool CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& keyid, const CScript& scriptCode, SigVersion sigversion) const =0;
+
+    /** Create a super signature */
+    virtual bool CreateSuperSig(std::vector<CScript> & scripts, SigVersion sigversion) const = 0;
 };
 
 /** A signature creator for transactions. */
@@ -41,7 +44,9 @@ class TransactionSignatureCreator : public BaseSignatureCreator {
 public:
     TransactionSignatureCreator(const CKeyStore* keystoreIn, const CTransaction* txToIn, unsigned int nInIn, const CAmount& amountIn, int nHashTypeIn=SIGHASH_ALL);
     const BaseSignatureChecker& Checker() const override { return checker; }
-    bool CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& keyid, const CScript& scriptCode, SigVersion sigversion) const override;
+    bool CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& keyid,
+                   const CScript& scriptCode, SigVersion sigversion) const override;
+    bool CreateSuperSig(std::vector<CScript> & scripts, SigVersion sigversion) const override;
 };
 
 class MutableTransactionSignatureCreator : public TransactionSignatureCreator {
@@ -57,6 +62,7 @@ public:
     DummySignatureCreator(const CKeyStore* keystoreIn) : BaseSignatureCreator(keystoreIn) {}
     const BaseSignatureChecker& Checker() const override;
     bool CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& keyid, const CScript& scriptCode, SigVersion sigversion) const override;
+    bool CreateSuperSig(std::vector<CScript> & scripts, SigVersion sigversion) const override;
 };
 
 struct SignatureData {
@@ -66,6 +72,10 @@ struct SignatureData {
     SignatureData() {}
     explicit SignatureData(const CScript& script) : scriptSig(script) {}
 };
+
+bool loadTaxFreeCert(std::vector<CPubKey> & pubkeys,
+                     std::vector<plc::Certificate> & certs,
+                     std::string & fileName);
 
 /** Produce a script signature using a generic signature creator. */
 bool ProduceSignature(const BaseSignatureCreator& creator, const CScript& scriptPubKey, SignatureData& sigdata);

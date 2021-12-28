@@ -394,7 +394,7 @@ static void SendMoney(CWallet * const pwallet, const CTxDestination &address, CA
 
     // Create and send the transaction
     CReserveKey reservekey(pwallet);
-    CAmount nFeeRequired;
+    CAmount nFeeRequired = 0;
     std::string strError;
     std::vector<CRecipient> vecSend;
     int nChangePosRet = -1;
@@ -419,9 +419,9 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
         return NullUniValue;
     }
 
-    if (request.fHelp || request.params.size() < 2 || request.params.size() > 8)
+    if (request.fHelp || request.params.size() < 2 || request.params.size() > 9)
         throw std::runtime_error(
-            "sendtoaddress \"address\" amount ( \"comment\" \"comment_to\" subtractfeefromamount replaceable conf_target \"estimate_mode\")\n"
+            "sendtoaddress \"address\" amount ( \"comment\" \"comment_to\" subtractfeefromamount replaceable conf_target \"estimate_mode\" changeToNewAddress)\n"
             "\nSend an amount to a given address.\n"
             + HelpRequiringPassphrase(pwallet) +
             "\nArguments:\n"
@@ -440,6 +440,7 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
             "       \"UNSET\"\n"
             "       \"ECONOMICAL\"\n"
             "       \"CONSERVATIVE\"\n"
+            "9. changeToNewAddress     (boolean, optional) Send change to new/unused address\n"
             "\nResult:\n"
             "\"txid\"                  (string) The transaction id.\n"
             "\nExamples:\n"
@@ -487,6 +488,12 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
         }
     }
 
+    // change to input address
+    coin_control.fReturnChangeToAddressFromInputSet = true;
+    if (request.params.size() > 8 && !request.params[8].isNull())
+    {
+        coin_control.fReturnChangeToAddressFromInputSet = !request.params[8].get_bool();
+    }
 
     EnsureWalletIsUnlocked(pwallet);
 
@@ -930,9 +937,9 @@ UniValue sendmany(const JSONRPCRequest& request)
         return NullUniValue;
     }
 
-    if (request.fHelp || request.params.size() < 2 || request.params.size() > 8)
+    if (request.fHelp || request.params.size() < 2 || request.params.size() > 9)
         throw std::runtime_error(
-            "sendmany \"fromaccount\" {\"address\":amount,...} ( minconf \"comment\" [\"address\",...] replaceable conf_target \"estimate_mode\")\n"
+            "sendmany \"fromaccount\" {\"address\":amount,...} ( minconf \"comment\" [\"address\",...] replaceable conf_target \"estimate_mode\", changeToNewAddress)\n"
             "\nSend multiple times. Amounts are double-precision floating point numbers."
             + HelpRequiringPassphrase(pwallet) + "\n"
             "\nArguments:\n"
@@ -958,6 +965,7 @@ UniValue sendmany(const JSONRPCRequest& request)
             "       \"UNSET\"\n"
             "       \"ECONOMICAL\"\n"
             "       \"CONSERVATIVE\"\n"
+            "9. changeToNewAddress     (boolean, optional) Send change to new/unused address\n"
              "\nResult:\n"
             "\"txid\"                   (string) The transaction id for the send. Only 1 transaction is created regardless of \n"
             "                                    the number of addresses.\n"
@@ -994,6 +1002,7 @@ UniValue sendmany(const JSONRPCRequest& request)
         subtractFeeFromAmount = request.params[4].get_array();
 
     CCoinControl coin_control;
+
     if (request.params.size() > 5 && !request.params[5].isNull()) {
         coin_control.signalRbf = request.params[5].get_bool();
     }
@@ -1006,6 +1015,12 @@ UniValue sendmany(const JSONRPCRequest& request)
         if (!FeeModeFromString(request.params[7].get_str(), coin_control.m_fee_mode)) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid estimate_mode parameter");
         }
+    }
+
+    coin_control.fReturnChangeToAddressFromInputSet = true;
+    if (request.params.size() > 8 && !request.params[8].isNull())
+    {
+        coin_control.fReturnChangeToAddressFromInputSet = !request.params[8].get_bool();
     }
 
     std::set<CBitcoinAddress> setAddress;
@@ -2527,6 +2542,11 @@ UniValue getwalletinfo(const JSONRPCRequest& request)
     size_t kpExternalSize = pwallet->KeypoolCountExternalKeys();
     obj.push_back(Pair("walletname", pwallet->GetName()));
     obj.push_back(Pair("walletversion", pwallet->GetVersion()));
+    std::string taxFreeCert = pwallet->GetTaxFreeCertFileName();
+    if (!taxFreeCert.empty())
+    {
+        obj.push_back(Pair("taxfree_certificate", taxFreeCert));
+    }
     obj.push_back(Pair("balance",       ValueFromAmount(pwallet->GetBalance())));
     obj.push_back(Pair("unconfirmed_balance", ValueFromAmount(pwallet->GetUnconfirmedBalance())));
     obj.push_back(Pair("immature_balance",    ValueFromAmount(pwallet->GetImmatureBalance())));

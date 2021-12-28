@@ -28,7 +28,10 @@ from .bignum import bn2vch
 MAX_SCRIPT_SIZE = 10000
 MAX_SCRIPT_ELEMENT_SIZE = 520
 MAX_SCRIPT_OPCODES = 201
-GRAVE_PKH = hex_str_to_bytes('7e8d5abc0c1910fd3fcbb74617cb6ca9bf784aca')
+GRAVE_1_PKH_TESTNET = hex_str_to_bytes('7e8d5abc0c1910fd3fcbb74617cb6ca9bf784aca')
+GRAVE_1_PKH_MAINNET = hex_str_to_bytes('a20c0a4960089d017940b351cbd015da052b482a')
+GRAVE_1_PKH = GRAVE_1_PKH_TESTNET
+GRAVE_2_SH = '8296da5ca015c76181754a475b0677012cf63960'
 
 OPCODE_NAMES = {}
 
@@ -239,6 +242,7 @@ OP_NOP10 = CScriptOp(0xb9)
 
 # PLCU specific
 OP_CHECKREWARD = CScriptOp(0xc0)
+OP_CHECKSUPER  = CScriptOp(0xc1)
 
 # template matching params
 OP_SMALLINTEGER = CScriptOp(0xfa)
@@ -969,8 +973,8 @@ def GetP2SHScript(scripthash):
 def GetP2SHScriptWithTimeLock(scripthash, time):
     return CScript([time, OP_CHECKLOCKTIMEVERIFY, OP_DROP, OP_HASH160, scripthash, OP_EQUAL])
 
-def GetP2SHMoneyboxScript():
-    op_checkreward_hash = hash160(bytearray([int(OP_CHECKREWARD)]))
+def GetP2SHMoneyboxScript(opcode = OP_CHECKREWARD):
+    op_checkreward_hash = hash160(bytearray([int(opcode)]))
     return CScript([OP_HASH160, op_checkreward_hash, OP_EQUAL])
 
 def GetP2SHGraveScript():
@@ -1011,9 +1015,32 @@ def ScriptAddress(script, testnet = True):
 def MoneyboxP2SHAddress(testnet = True):
     return ScriptAddress(CScript([OP_CHECKREWARD]), testnet)
 
-def GraveAddress(testnet = True):
-    assert (testnet)
-    addr = AddressFromPubkeyHash(GRAVE_PKH, testnet)
-    assert_equal(addr, GRAVE_ADDRESS)
-    return addr
-    # return 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk' if testnet else 'U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho'
+def GraveScript1(testnet = True):
+    return GetP2PKHScript(GRAVE_1_PKH_TESTNET if testnet else GRAVE_1_PKH_MAINNET)
+
+def GraveScript2():
+    op_checkreward_hash = hash160(bytearray([int(OP_INVALIDOPCODE)]))
+    return GetP2SHScript(op_checkreward_hash)
+
+def SecretBytesToBase58(secret_bytes, testnet = True):
+    prefix = b'\xC8\x05\xDE' if testnet else b'\xC8\x04\xAA'
+    payload = prefix + secret_bytes
+    hash = hash256(payload)
+    payload += hash[0:4]
+    return b58encode(payload)
+
+def Base58ToSecretBytes(key_base58, testnet = True):
+    prefix = b'\xC8\x05\xDE' if testnet else b'\xC8\x04\xAA'
+    decoded = b58decode(key_base58)
+    payload = decoded[:-4]
+    hash_calc = hash256(payload)
+    hash_got = decoded[-4:]
+    assert_equal(hash_calc[0:4], hash_got)
+    prefix_got = payload[:3]
+    assert_equal(prefix, prefix_got)
+    secret_bytes = payload[3:]
+    return secret_bytes
+
+def print_key_verbose(key, name):
+    pubkey = key.get_pubkey()
+    logger.debug(f'key: {name}, private: {bytes_to_hex_str(key.get_secret())} / {SecretBytesToBase58(key.get_secret())}, public: {bytes_to_hex_str(pubkey)}, pkh: {bytes_to_hex_str(hash160(pubkey))}, address: {AddressFromPubkey(pubkey)}')

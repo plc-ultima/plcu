@@ -183,9 +183,9 @@ enum opcodetype
     OP_NOP10 = 0xb9,
 
     // PLCU specific
-    OP_CHECKREWARD = 0xc0,
-    OP_CHECKCERTVERIFY = 0xc1,
-    OP_CHECKDESTINATIONVERIFY = 0xc2,
+    OP_CHECKREWARD     = 0xc0,
+    OP_CHECKSUPER      = 0xc1,
+    OP_CHECKDESTINATIONVERIFY = 0xd0,
 
     // template matching params
     OP_SMALLINTEGER = 0xfa,
@@ -702,6 +702,10 @@ public:
 
     // return iterator for begin of script, skip leading data and op_drop(x)
     const_iterator begin_skipLeadingData() const;
+
+    // return iterator for begin of script, skip timelock data
+    // OP_SMALLINTEGER OP_CHECKLOCKTIMEVERIFY OP_DROP
+    const_iterator begin_skipLockTimeVerify() const;
 };
 
 struct CScriptWitness

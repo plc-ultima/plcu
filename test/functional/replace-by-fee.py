@@ -22,12 +22,15 @@ def make_utxo(node, amount, confirmed=True, scriptPubKey=CScript([1])):
     confirmed - txouts created will be confirmed in the blockchain;
                 unconfirmed otherwise.
     """
-    fee = 1*COIN
-    while node.getbalance() < satoshi_round((amount + fee)/COIN):
+    amount = ToCoins(amount)
+    fee = Decimal(1)
+    (burn1, burn2) = GetBurnedValue(amount)
+    amount_to_take = amount + burn1 + burn2
+    while node.getbalance() < amount_to_take + fee:
         node.generate(10)
 
     new_addr = node.getnewaddress()
-    txid = node.sendtoaddress(new_addr, satoshi_round((amount+fee)/COIN))
+    txid = node.sendtoaddress(new_addr, amount_to_take + fee)
     tx1 = node.getrawtransaction(txid, 1)
     txid = int(txid, 16)
     i = None
@@ -37,9 +40,13 @@ def make_utxo(node, amount, confirmed=True, scriptPubKey=CScript([1])):
             break
     assert i is not None
 
+    (burn1, burn2, rest) = BurnedAndChangeAmount(amount_to_take)
+    assert_greater_than_or_equal(rest, amount)
     tx2 = CTransaction()
     tx2.vin = [CTxIn(COutPoint(txid, i))]
-    tx2.vout = [CTxOut(amount, scriptPubKey)]
+    tx2.vout = [CTxOut(ToSatoshi(amount), scriptPubKey),
+                CTxOut(ToSatoshi(burn1), GraveScript1()),
+                CTxOut(ToSatoshi(burn2), GraveScript2())]
     tx2.rehash()
 
     signed_tx = node.signrawtransaction(txToHex(tx2))
@@ -123,9 +130,12 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # transactions might not be accepted by our peers.
         self.sync_all()
 
+        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal(1))
         tx1a = CTransaction()
         tx1a.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1a.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx1a.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1a_hex = txToHex(tx1a)
         tx1a_txid = self.nodes[0].sendrawtransaction(tx1a_hex, True)
 
@@ -134,7 +144,9 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # Should fail because we haven't changed the fee
         tx1b = CTransaction()
         tx1b.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1b.vout = [CTxOut(1*COIN, CScript([b'b']))]
+        tx1b.vout = [CTxOut(ToSatoshi(rest), CScript([b'b'])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1b_hex = txToHex(tx1b)
 
         # This will raise an exception due to insufficient fee
@@ -143,9 +155,12 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         assert_raises_rpc_error(-26, "txn-mempool-conflict", self.nodes[1].sendrawtransaction, tx1b_hex, True)
 
         # Extra 0.1 PLCU fee
+        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('0.9'))
         tx1b = CTransaction()
         tx1b.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1b.vout = [CTxOut(int(0.9*COIN), CScript([b'b']))]
+        tx1b.vout = [CTxOut(ToSatoshi(rest), CScript([b'b'])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1b_hex = txToHex(tx1b)
         # Replacement still disabled even with "enough fee"
         assert_raises_rpc_error(-26, "txn-mempool-conflict", self.nodes[1].sendrawtransaction, tx1b_hex, True)
@@ -175,9 +190,13 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         chain_txids = []
         while remaining_value > 10*COIN:
             remaining_value -= 1*COIN
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(remaining_value))
+            remaining_value = ToSatoshi(rest)
             tx = CTransaction()
             tx.vin = [CTxIn(prevout, nSequence=0)]
-            tx.vout = [CTxOut(remaining_value, CScript([1]))]
+            tx.vout = [CTxOut(ToSatoshi(rest), CScript([1])),
+                       CTxOut(ToSatoshi(burn1), GraveScript1()),
+                       CTxOut(ToSatoshi(burn2), GraveScript2())]
             tx_hex = txToHex(tx)
             txid = self.nodes[0].sendrawtransaction(tx_hex, True)
             chain_txids.append(txid)
@@ -185,18 +204,24 @@ class ReplaceByFeeTest(BitcoinTestFramework):
 
         # Whether the double-spend is allowed is evaluated by including all
         # child fees - 40 PLCU - so this attempt is rejected.
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(initial_nValue) - 20)
         dbl_tx = CTransaction()
         dbl_tx.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        dbl_tx.vout = [CTxOut(initial_nValue - 30*COIN, CScript([1]))]
+        dbl_tx.vout = [CTxOut(ToSatoshi(rest), CScript([1])),
+                       CTxOut(ToSatoshi(burn1), GraveScript1()),
+                       CTxOut(ToSatoshi(burn2), GraveScript2())]
         dbl_tx_hex = txToHex(dbl_tx)
 
         # This will raise an exception due to insufficient fee
         assert_raises_rpc_error(-26, "insufficient fee", self.nodes[0].sendrawtransaction, dbl_tx_hex, True)
 
         # Accepted with sufficient fee
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(Decimal(1)))
         dbl_tx = CTransaction()
         dbl_tx.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        dbl_tx.vout = [CTxOut(1*COIN, CScript([1]))]
+        dbl_tx.vout = [CTxOut(ToSatoshi(rest), CScript([1])),
+                       CTxOut(ToSatoshi(burn1), GraveScript1()),
+                       CTxOut(ToSatoshi(burn2), GraveScript2())]
         dbl_tx_hex = txToHex(dbl_tx)
         txid = self.nodes[0].sendrawtransaction(dbl_tx_hex, True)
 
@@ -217,12 +242,15 @@ class ReplaceByFeeTest(BitcoinTestFramework):
             if _total_txs[0] >= max_txs:
                 return
 
-            txout_value = (initial_value - fee) // tree_width
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(initial_value - fee))
+            txout_value = ToSatoshi(rest) // tree_width
             if txout_value < fee:
                 return
 
             vout = [CTxOut(txout_value, CScript([i+1]))
                     for i in range(tree_width)]
+            vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+            vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
             tx = CTransaction()
             tx.vin = [CTxIn(prevout, nSequence=0)]
             tx.vout = vout
@@ -235,7 +263,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
 
             txid = int(txid, 16)
 
-            for i, txout in enumerate(tx.vout):
+            for i, txout in enumerate(tx.vout[:-2]):
                 for x in branch(COutPoint(txid, i), txout_value,
                                   max_txs,
                                   tree_width=tree_width, fee=fee,
@@ -248,17 +276,23 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         assert_equal(len(tree_txs), n)
 
         # Attempt double-spend, will fail because too little fee paid
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(initial_nValue - fee*n))
         dbl_tx = CTransaction()
         dbl_tx.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        dbl_tx.vout = [CTxOut(initial_nValue - fee*n, CScript([1]))]
+        dbl_tx.vout = [CTxOut(ToSatoshi(rest), CScript([1])),
+                       CTxOut(ToSatoshi(burn1), GraveScript1()),
+                       CTxOut(ToSatoshi(burn2), GraveScript2())]
         dbl_tx_hex = txToHex(dbl_tx)
         # This will raise an exception due to insufficient fee
         assert_raises_rpc_error(-26, "insufficient fee", self.nodes[0].sendrawtransaction, dbl_tx_hex, True)
 
         # 1 PLCU fee is enough
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(initial_nValue - fee*n - 1*COIN))
         dbl_tx = CTransaction()
         dbl_tx.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        dbl_tx.vout = [CTxOut(initial_nValue - fee*n - 1*COIN, CScript([1]))]
+        dbl_tx.vout = [CTxOut(ToSatoshi(rest), CScript([1])),
+                       CTxOut(ToSatoshi(burn1), GraveScript1()),
+                       CTxOut(ToSatoshi(burn2), GraveScript2())]
         dbl_tx_hex = txToHex(dbl_tx)
         self.nodes[0].sendrawtransaction(dbl_tx_hex, True)
 
@@ -276,9 +310,12 @@ class ReplaceByFeeTest(BitcoinTestFramework):
             tree_txs = list(branch(tx0_outpoint, initial_nValue, n, fee=fee))
             assert_equal(len(tree_txs), n)
 
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(initial_nValue - 2 * fee * n))
             dbl_tx = CTransaction()
             dbl_tx.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-            dbl_tx.vout = [CTxOut(initial_nValue - 2*fee*n, CScript([1]))]
+            dbl_tx.vout = [CTxOut(ToSatoshi(rest), CScript([1])),
+                           CTxOut(ToSatoshi(burn1), GraveScript1()),
+                           CTxOut(ToSatoshi(burn2), GraveScript2())]
             dbl_tx_hex = txToHex(dbl_tx)
             # This will raise an exception
             assert_raises_rpc_error(-26, "too many potential replacements", self.nodes[0].sendrawtransaction, dbl_tx_hex, True)
@@ -292,16 +329,24 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         tx0_outpoint = make_utxo(self.nodes[0], int(1.1*COIN))
 
         tx1a = CTransaction()
+        output_sum = Decimal(1)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(output_sum)
         tx1a.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1a.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx1a.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1a_hex = txToHex(tx1a)
         tx1a_txid = self.nodes[0].sendrawtransaction(tx1a_hex, True)
 
         # Higher fee, but the fee per KB is much lower, so the replacement is
         # rejected.
         tx1b = CTransaction()
+        output_sum = Decimal('0.001')
+        (burn1, burn2, rest) = BurnedAndChangeAmount(output_sum)
         tx1b.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1b.vout = [CTxOut(int(0.001*COIN), CScript([b'a'*999000]))]
+        tx1b.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'*999000])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1b_hex = txToHex(tx1b)
 
         # This will raise an exception due to insufficient fee
@@ -313,8 +358,12 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         utxo2 = make_utxo(self.nodes[0], 3*COIN)
 
         tx1a = CTransaction()
+        output_sum = Decimal('1.1')
+        (burn1, burn2, rest) = BurnedAndChangeAmount(output_sum)
         tx1a.vin = [CTxIn(utxo1, nSequence=0)]
-        tx1a.vout = [CTxOut(int(1.1*COIN), CScript([b'a']))]
+        tx1a.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1a_hex = txToHex(tx1a)
         tx1a_txid = self.nodes[0].sendrawtransaction(tx1a_hex, True)
 
@@ -332,8 +381,12 @@ class ReplaceByFeeTest(BitcoinTestFramework):
 
         # Spend tx1a's output to test the indirect case.
         tx1b = CTransaction()
+        output_sum = Decimal(1)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(output_sum)
         tx1b.vin = [CTxIn(COutPoint(tx1a_txid, 0), nSequence=0)]
-        tx1b.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx1b.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1b_hex = txToHex(tx1b)
         tx1b_txid = self.nodes[0].sendrawtransaction(tx1b_hex, True)
         tx1b_txid = int(tx1b_txid, 16)
@@ -353,8 +406,12 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         unconfirmed_utxo = make_utxo(self.nodes[0], int(0.1*COIN), False)
 
         tx1 = CTransaction()
+        output_sum = Decimal(1)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(output_sum)
         tx1.vin = [CTxIn(confirmed_utxo)]
-        tx1.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx1.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                    CTxOut(ToSatoshi(burn1), GraveScript1()),
+                    CTxOut(ToSatoshi(burn2), GraveScript2())]
         tx1_hex = txToHex(tx1)
         tx1_txid = self.nodes[0].sendrawtransaction(tx1_hex, True)
 
@@ -372,14 +429,17 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # transactions
 
         # Start by creating a single transaction with many outputs
-        initial_nValue = 10*COIN
-        utxo = make_utxo(self.nodes[0], initial_nValue)
-        fee = int(0.0002*COIN)
-        split_value = int((initial_nValue - 10*fee)/(MAX_REPLACEMENT_LIMIT+1))
+        initial_nValue = Decimal(10)
+        utxo = make_utxo(self.nodes[0], ToSatoshi(initial_nValue))
+        fee = Decimal('0.0002')
+        (burn1, burn2, rest) = BurnedAndChangeAmount(initial_nValue - 10*fee)
+        split_value = satoshi_round(rest / (MAX_REPLACEMENT_LIMIT+1))
 
         outputs = []
         for i in range(MAX_REPLACEMENT_LIMIT+1):
-            outputs.append(CTxOut(split_value, CScript([1])))
+            outputs.append(CTxOut(ToSatoshi(split_value), CScript([1])))
+        outputs.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        outputs.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
 
         splitting_tx = CTransaction()
         splitting_tx.vin = [CTxIn(utxo, nSequence=0)]
@@ -393,20 +453,26 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         for i in range(MAX_REPLACEMENT_LIMIT+1):
             tx_i = CTransaction()
             tx_i.vin = [CTxIn(COutPoint(txid, i), nSequence=0)]
-            tx_i.vout = [CTxOut(split_value-fee, CScript([b'a']))]
+            (burn1, burn2, rest) = BurnedAndChangeAmount(split_value-fee)
+            tx_i.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                         CTxOut(ToSatoshi(burn1), GraveScript1()),
+                         CTxOut(ToSatoshi(burn2), GraveScript2())]
             tx_i_hex = txToHex(tx_i)
             self.nodes[0].sendrawtransaction(tx_i_hex, True)
 
         # Now create doublespend of the whole lot; should fail.
         # Need a big enough fee to cover all spending transactions and have
         # a higher fee rate
-        double_spend_value = (split_value-100*fee)*(MAX_REPLACEMENT_LIMIT+1)
+        double_spend_value = (split_value - 100 * fee) * (MAX_REPLACEMENT_LIMIT + 1)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(double_spend_value)
         inputs = []
         for i in range(MAX_REPLACEMENT_LIMIT+1):
             inputs.append(CTxIn(COutPoint(txid, i), nSequence=0))
         double_tx = CTransaction()
         double_tx.vin = inputs
-        double_tx.vout = [CTxOut(double_spend_value, CScript([b'a']))]
+        double_tx.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                          CTxOut(ToSatoshi(burn1), GraveScript1()),
+                          CTxOut(ToSatoshi(burn2), GraveScript2())]
         double_tx_hex = txToHex(double_tx)
 
         # This will raise an exception
@@ -415,7 +481,9 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # If we remove an input, it should pass
         double_tx = CTransaction()
         double_tx.vin = inputs[0:-1]
-        double_tx.vout = [CTxOut(double_spend_value, CScript([b'a']))]
+        double_tx.vout = [CTxOut(ToSatoshi(rest), CScript([b'a'])),
+                          CTxOut(ToSatoshi(burn1), GraveScript1()),
+                          CTxOut(ToSatoshi(burn2), GraveScript2())]
         double_tx_hex = txToHex(double_tx)
         self.nodes[0].sendrawtransaction(double_tx_hex, True)
 
@@ -424,16 +492,22 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         tx0_outpoint = make_utxo(self.nodes[0], int(1.1*COIN))
 
         # Create a non-opting in transaction
+        output_amount = Decimal(1)
+        (burnA1, burnA2, restA) = BurnedAndChangeAmount(output_amount)
         tx1a = CTransaction()
         tx1a.vin = [CTxIn(tx0_outpoint, nSequence=0xffffffff)]
-        tx1a.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx1a.vout = [CTxOut(ToSatoshi(restA), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burnA1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnA2), GraveScript2())]
         tx1a_hex = txToHex(tx1a)
         tx1a_txid = self.nodes[0].sendrawtransaction(tx1a_hex, True)
 
         # Shouldn't be able to double-spend
         tx1b = CTransaction()
         tx1b.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1b.vout = [CTxOut(int(0.9*COIN), CScript([b'b']))]
+        tx1b.vout = [CTxOut(ToSatoshi(restA - Decimal('0.1')), CScript([b'b'])),
+                     CTxOut(ToSatoshi(burnA1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnA2), GraveScript2())]
         tx1b_hex = txToHex(tx1b)
 
         # This will raise an exception
@@ -444,14 +518,18 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # Create a different non-opting in transaction
         tx2a = CTransaction()
         tx2a.vin = [CTxIn(tx1_outpoint, nSequence=0xfffffffe)]
-        tx2a.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx2a.vout = [CTxOut(ToSatoshi(restA), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burnA1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnA2), GraveScript2())]
         tx2a_hex = txToHex(tx2a)
         tx2a_txid = self.nodes[0].sendrawtransaction(tx2a_hex, True)
 
         # Still shouldn't be able to double-spend
         tx2b = CTransaction()
         tx2b.vin = [CTxIn(tx1_outpoint, nSequence=0)]
-        tx2b.vout = [CTxOut(int(0.9*COIN), CScript([b'b']))]
+        tx2b.vout = [CTxOut(ToSatoshi(restA - Decimal('0.1')), CScript([b'b'])),
+                     CTxOut(ToSatoshi(burnA1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnA2), GraveScript2())]
         tx2b_hex = txToHex(tx2b)
 
         # This will raise an exception
@@ -465,21 +543,30 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         tx2a_txid = int(tx2a_txid, 16)
 
         tx3a = CTransaction()
+        (burnC1, burnC2, restC) = BurnedAndChangeAmount(restA * 2 - Decimal('0.2'))
         tx3a.vin = [CTxIn(COutPoint(tx1a_txid, 0), nSequence=0xffffffff),
                     CTxIn(COutPoint(tx2a_txid, 0), nSequence=0xfffffffd)]
-        tx3a.vout = [CTxOut(int(0.9*COIN), CScript([b'c'])), CTxOut(int(0.9*COIN), CScript([b'd']))]
+        tx3a.vout = [CTxOut(ToSatoshi(restC) // 2, CScript([b'c'])),
+                     CTxOut(ToSatoshi(restC) // 2, CScript([b'd'])),
+                     CTxOut(ToSatoshi(burnC1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnC2), GraveScript2())]
         tx3a_hex = txToHex(tx3a)
 
         self.nodes[0].sendrawtransaction(tx3a_hex, True)
 
         tx3b = CTransaction()
+        (burnD1, burnD2, restD) = BurnedAndChangeAmount(restA - Decimal('0.5'))
         tx3b.vin = [CTxIn(COutPoint(tx1a_txid, 0), nSequence=0)]
-        tx3b.vout = [CTxOut(int(0.5*COIN), CScript([b'e']))]
+        tx3b.vout = [CTxOut(ToSatoshi(restD), CScript([b'e'])),
+                     CTxOut(ToSatoshi(burnD1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnD2), GraveScript2())]
         tx3b_hex = txToHex(tx3b)
 
         tx3c = CTransaction()
         tx3c.vin = [CTxIn(COutPoint(tx2a_txid, 0), nSequence=0)]
-        tx3c.vout = [CTxOut(int(0.5*COIN), CScript([b'f']))]
+        tx3c.vout = [CTxOut(ToSatoshi(restD), CScript([b'f'])),
+                     CTxOut(ToSatoshi(burnD1), GraveScript1()),
+                     CTxOut(ToSatoshi(burnD2), GraveScript2())]
         tx3c_hex = txToHex(tx3c)
 
         self.nodes[0].sendrawtransaction(tx3b_hex, True)
@@ -494,16 +581,24 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         # 1. Check that feeperkb uses modified fees
         tx0_outpoint = make_utxo(self.nodes[0], int(1.1*COIN))
 
+        output_amount1a = Decimal(1)
+        (burn1a1, burn1a2, rest1a) = BurnedAndChangeAmount(output_amount1a)
         tx1a = CTransaction()
         tx1a.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1a.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx1a.vout = [CTxOut(ToSatoshi(rest1a), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn1a1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn1a2), GraveScript2())]
         tx1a_hex = txToHex(tx1a)
         tx1a_txid = self.nodes[0].sendrawtransaction(tx1a_hex, True)
 
         # Higher fee, but the actual fee per KB is much lower.
+        output_amount1b = Decimal('0.001')
+        (burn1b1, burn1b2, rest1b) = BurnedAndChangeAmount(output_amount1b)
         tx1b = CTransaction()
         tx1b.vin = [CTxIn(tx0_outpoint, nSequence=0)]
-        tx1b.vout = [CTxOut(int(0.001*COIN), CScript([b'a'*740000]))]
+        tx1b.vout = [CTxOut(ToSatoshi(rest1b), CScript([b'a'*740000])),
+                     CTxOut(ToSatoshi(burn1b1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn1b2), GraveScript2())]
         tx1b_hex = txToHex(tx1b)
 
         # Verify tx1b cannot replace tx1a.
@@ -522,14 +617,20 @@ class ReplaceByFeeTest(BitcoinTestFramework):
 
         tx2a = CTransaction()
         tx2a.vin = [CTxIn(tx1_outpoint, nSequence=0)]
-        tx2a.vout = [CTxOut(1*COIN, CScript([b'a']))]
+        tx2a.vout = [CTxOut(ToSatoshi(rest1a), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn1a1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn1a2), GraveScript2())]
         tx2a_hex = txToHex(tx2a)
         tx2a_txid = self.nodes[0].sendrawtransaction(tx2a_hex, True)
 
         # Lower fee, but we'll prioritise it
+        output_amount2b = Decimal('1.01')
+        (burn2b1, burn2b2, rest2b) = BurnedAndChangeAmount(output_amount2b)
         tx2b = CTransaction()
         tx2b.vin = [CTxIn(tx1_outpoint, nSequence=0)]
-        tx2b.vout = [CTxOut(int(1.01*COIN), CScript([b'a']))]
+        tx2b.vout = [CTxOut(ToSatoshi(rest2b), CScript([b'a'])),
+                     CTxOut(ToSatoshi(burn2b1), GraveScript1()),
+                     CTxOut(ToSatoshi(burn2b2), GraveScript2())]
         tx2b.rehash()
         tx2b_hex = txToHex(tx2b)
 

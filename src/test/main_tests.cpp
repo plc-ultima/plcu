@@ -20,19 +20,23 @@ BOOST_AUTO_TEST_CASE(subsidy_limit_test)
     int nHeight = 1; // skip genesis block
     // countOfInitialAmountBlocks blocks = 56kk*COIN
     for (; nHeight <= consensusParams.countOfInitialAmountBlocks; ++nHeight) {
-        CAmount nSubsidy = GetBlockSubsidy(nHeight, consensusParams);
-        BOOST_CHECK(nSubsidy == 6000000 * COIN);
+        CAmount nSubsidy = GetBlockSubsidy(nHeight, 0, consensusParams);
+        BOOST_CHECK(nSubsidy == 5000 * COIN);
         nSum += nSubsidy;
         BOOST_CHECK(MoneyRange(nSubsidy));
     }
 
-    BOOST_CHECK_EQUAL(nSum, 600000000LL*COIN);
+    BOOST_CHECK_EQUAL(nSum, 500000LL*COIN);
 
     // next blocks - 0
-    BOOST_CHECK(GetBlockSubsidy(101, consensusParams) == 0);
-    BOOST_CHECK(GetBlockSubsidy(1001, consensusParams) == 0);
-    BOOST_CHECK(GetBlockSubsidy(10001, consensusParams) == 0);
-    BOOST_CHECK(GetBlockSubsidy(100001, consensusParams) == 0);
+    BOOST_CHECK(GetBlockSubsidy(   101, 0, consensusParams) ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy(  1001, 0, consensusParams) ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 10001, 0, consensusParams) ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 25000, 0, consensusParams) ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 25001, 0, consensusParams) ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 35000, 0, consensusParams) ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 35001, 0, consensusParams) == 0.00005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy(100001, 0, consensusParams) == 0.00005 * COIN);
 }
 
 bool ReturnFalse() { return false; }

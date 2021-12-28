@@ -104,12 +104,13 @@ class BIP68_112_113Test(ComparisonTestFramework):
         test.run()
 
     def send_generic_input_tx(self, node, coinbases):
-        amount = 6000000 - Decimal('0.01')
+        amount = BASE_CB_AMOUNT - Decimal('0.01')
         return node.sendrawtransaction(ToHex(self.sign_transaction(node, self.create_transaction(node, node.getblock(coinbases.pop())['tx'][0], self.nodeaddress, amount))))
 
     def create_transaction(self, node, txid, to_address, amount):
+        (burn1, burn2, rest) = BurnedAndChangeAmount(amount)
         inputs = [{ "txid" : txid, "vout" : 0}]
-        outputs = { to_address : amount }
+        outputs = { to_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2 }
         rawtx = node.createrawtransaction(inputs, outputs)
         tx = CTransaction()
         f = BytesIO(hex_str_to_bytes(rawtx))

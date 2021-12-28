@@ -124,7 +124,7 @@ class WalletBackupTest(BitcoinTestFramework):
         self.nodes[3].generate(100)
         sync_blocks(self.nodes)
 
-        assert_equal(self.nodes[0].getbalance(), 60000000)
+        assert_equal(self.nodes[0].getbalance(), 10 * BASE_CB_AMOUNT)
         assert_equal(self.nodes[1].getbalance(), 0)
         assert_equal(self.nodes[2].getbalance(), 0)
         assert_equal(self.nodes[3].getbalance(), 0)

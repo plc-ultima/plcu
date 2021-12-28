@@ -8,6 +8,7 @@
 #include "memusage.h"
 #include "random.h"
 #include "chainparams.h"
+#include "script/standard.h"
 #include "util.h"
 
 #include <assert.h>
@@ -65,7 +66,19 @@ bool Coin::clearMintedAmount()
     return true;
 }
 
-bool CCoinsView::GetCoin(const COutPoint &outpoint, Coin &coin) const { return false; }
+const CTxOut superOut(0, makeSuperTxScriptPubKey());
+const Coin   superCoin(superOut, 32, false);
+
+bool CCoinsView::GetCoin(const COutPoint &outpoint, Coin &coin) const
+{
+    if (outpoint.isMarker(supertransaction))
+    {
+        coin = superCoin;
+        return true;
+    }
+    return false;
+}
+
 uint256 CCoinsView::GetBestBlock() const { return uint256(); }
 std::vector<uint256> CCoinsView::GetHeadBlocks() const { return std::vector<uint256>(); }
 bool CCoinsView::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) { return false; }
@@ -159,6 +172,11 @@ bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, Coin* moveout) {
     cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();
     if (moveout) {
         *moveout = std::move(it->second.coin);
+    }
+    if (outpoint.isMarker(supertransaction))
+    {
+        // does not mark the marker as spent
+        return true;
     }
     if (it->second.flags & CCoinsCacheEntry::FRESH) {
         cacheCoins.erase(it);
@@ -324,9 +342,16 @@ CAmount CCoinsViewCache::GetUsedMoneyBoxAmount(const CTransaction & tx) const
 
 bool CCoinsViewCache::HaveInputs(const CTransaction& tx) const
 {
-    if (!tx.IsCoinBase()) {
-        for (unsigned int i = 0; i < tx.vin.size(); i++) {
-            if (!HaveCoin(tx.vin[i].prevout)) {
+    if (!tx.IsCoinBase())
+    {
+        for (unsigned int i = 0; i < tx.vin.size(); i++)
+        {
+            if (tx.vin[i].prevout.isMarker(supertransaction))
+            {
+                continue;
+            }
+            if (!HaveCoin(tx.vin[i].prevout))
+            {
                 return false;
             }
         }

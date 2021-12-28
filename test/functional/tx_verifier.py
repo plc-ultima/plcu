@@ -9,54 +9,45 @@ from test_framework.mininode import *
 from test_framework.util import *
 from test_framework.script import *
 from test_framework.key import *
-from minting import *
-from minting_testcases import ALLOWED_DELTA_REWARD
+from test_framework.blocktools import get_subsidy
+from test_framework.certs import *
+
 
 RPC_USER = 'xyu'
 RPC_PASSW = 'xyu'
-RPC_URL = 'http://127.0.0.1:8555/'
+RPC_URL = 'http://127.0.0.1:9556/'
 
 TESTNET = None  # will be determined automatically
 genezis_pubkey0 = None
 
 MONEYBOX_GRAN_MAIN = {
-    0: 10,
-    895104: 1000,
+    0: 100,
 }
 MONEYBOX_GRAN_TESTNET = {
-    0: 10,
-    600768: 100,
-    606816: 1000,
+    0: 100,
 }
 
 exclude_transactions = set(
     [
-        '9c1b429f144997afec37ffb4bb86f693bbdb161c0c39fb29296c9d810cf047bf', # testnet, with OP_CHECKDESTINATIONVERIFY (in output, not spent)
-        '42c635b1946022d1236ecca461b6a91bcd790a2bd2fa769f7782973a9550d2c8', # testnet, too high fee (moneybox robbery) (Minting 3.0/funding)
-        '874a88ec120dbcef5fe53afc4e7a4db9d03ca79801d5c85ac061006bb60c209c', # testnet, robbery (Minting 3.0/funding)
-        '736367770f660ef0a42752e975d7a1801105b2bf5803e474acb1ecf3bdccbc12', # testnet, robbery (Minting 3.0/funding)
-        '17ed2f81c26ac90c3363baa90df1dd9498263fdfd23c480a308912d3eb47eefe', # testnet, robbery (Minting 3.0/funding)
-        '1e511a291cccb5ba5cd12c3dc6e038a5f0d6ff98446c288d9aa6cc76db04fa40', # testnet, tx v3 without active_time
-        'ec0fafbf8606a0e4339aa665eb111fd420d1eae411b762a8493096cffd47e29c', # testnet, invalid reward (locked for 3 days)
-        '58cc84d4a62509c4a8de7f05dfb9a56cac7d90d9e232bc4181034188396ef42e', # testnet, invalid reward
-        'd4209b278e56683fd7568739a0c893a4545fff339a66b2aaf119cf4525fe6157', # testnet, invalid reward
-        '8332e300e0b22df021108bd5ffd7fe14d6d987b96410650f6c622ddc8747aff6', # testnet, invalid reward
-        '8d0d60aa731f2a4c2b507db937bf453a0c5f30b947e24f39a80ea3d9b05b1250', # testnet, invalid reward
-        'd7792b3f143962267b9c8ee503cae7f60c079365a0346a2aee6b56b02ac2256d', # main, only funding inputs
-        '7ee60b28737c39d61f70b66d8f9e6a98a81d57f726227a0f8ceb5b41c97eb631', # main, only funding inputs
-        '172866f10cc7be9e2f1e66695323ce3da4ab71bf32ff855a5f09b662e983be74', # main, rewadr for 0.5y, locked for 0.49y, needs drift 2.5d
+        'e932fafc1044f0ac390d27539cf5c6560603ee950267c6c43cee0d7d06789b68', # testnet, invalid compact signature in certificate
+        'ec5c421228f95b2e51505c44e526465dd164ce1e5b5a2bbc7413dfc89b67e94e', # testnet, invalid compact signature size in certificate
+        '3398e19b729de1dbf4bc6089e61fad3c5d422162249da4128e43663f5a01ebc3', # -//-
+        'dde8371ab284b377965b12be223c6a29b4ba3b6e919056e5bb02bdfcc6cbc6af', # -//-
+        '1ff34fe2f20b659a6efdf19bd8535586f829da5d2e60ddfe3ad9130bde9ecb48', # -//-
+        '42f32077c67dbddf2b336afab13c0d9aed1f3adfd7f1c6c75910f77a521d8928', # -//-
+        '01c84f0194c62496fbf3e948cb067b79968d4ac3f22cc8d41da8b2c8a2329c00', # -//-
+        'e71ab65a77edb3bab1eb7159f00328c8ea46f67606c08567c1cc6736d20fb810', # -//-
+        'dcb0ed15d7d881aa795a710518c2eb30475b91710558e31f07e42eb51fa573aa', # -//-
+        '757d0600e43b77426dfb1c97a711eb4c35d1e344cd755841322dce84fa873508', # -//-
     ]
 )
 
 # RULES_VERSION:
-# 1: stable branch, reward is calculated for any user outputs, reward per output
-# 2: dev branch, reward is calculated for locked user outputs, reward per transaction
-# 3: stable branch, (1) with:
-#     * user amount is taken from one locked user output with max lock time
+RULES_VERSION = 4
+# 4: reward is calculated for 1 locked user output with max amount, reward per transaction
+#     * user amount is taken from one locked user output with max amount
 #     * percent in certificate is per year; reward must be corrected due to user output lock interval
 
-RULES_VERSION = 3
-assert (RULES_VERSION in [1,2,3])
 
 def IsOp(script, op):
     return len(script) == 1 and script[0] == op
@@ -593,29 +584,22 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
         if minting_3_0:
             white_inputs = [inp for inp in vrftx.inputs if inp.prev_out.scriptPubKey != GetP2SHMoneyboxScript()]
             white_inputs_count = len(white_inputs)
-            Verify(white_inputs_count >= 1, 'no user (white) inputs')
+            Verify(white_inputs_count >= 1, 'no user inputs')
             white_pkh_set = set()
-            white_pkh_pairs_set = set()
             for input in white_inputs:
                 ai = GetAddressInfo(input.prev_out.scriptPubKey)
                 if len(ai.addresses) == 1:
                     white_pkh_set.add(ai.addresses[0])
-                elif ai.addr_type == 'ab_minting' or ai.addr_type == 'ab_minting_ex':
-                    white_pkh_set.add(ai.addresses[0])
-                elif ai.addr_type == 'funding':
-                    if ai.addresses[1] == ai.addresses[2]:
-                        white_pkh_set.add(ai.addresses[0])
-                    else:
-                        white_pkh_pairs_set.add((ai.addresses[1], ai.addresses[2]))
-            Verify(len(white_pkh_set) == 1, 'missing/different/ambigious white inputs: {}'.format([AddressFromPubkeyHash(h, TESTNET) for h in white_pkh_set]))
+                else:
+                    Verify(0, f'Invalid user input (addresses: {ai.addresses})')
+            Verify(len(white_pkh_set) == 1, 'missing/different/ambigious user inputs: {}'.format([AddressFromPubkeyHash(h, TESTNET) for h in white_pkh_set]))
             white_pkh = list(white_pkh_set)[0]
-            for elem in white_pkh_pairs_set:
-                Verify(white_pkh in elem, 'different/ambigious white inputs in funding inputs, {}, {}'.format(AddressFromPubkeyHash(white_pkh, TESTNET), [AddressFromPubkeyHash(h, TESTNET) for h in elem]))
             white_locked_outputs = []
             white_change_outputs = []
             other_outputs = []
-            white_output_with_max_locktime = None
-            max_lock_timepoint = 0
+            white_output_with_max_amount = None
+            max_locked_amount = 0
+            timepoint_of_max_locked_amount = 0
 
             for output in vrftx.outputs:
                 ai = GetAddressInfo(output.scriptPubKey)
@@ -629,22 +613,10 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
                 elif ai.addr_type == 'p2pk_locked' or ai.addr_type == 'p2pkh_locked':
                     if ai.addresses[0] == white_pkh:
                         white_locked_outputs.append(output)
-                        if not white_output_with_max_locktime or ai.lock_timepoint > max_lock_timepoint:
-                            max_lock_timepoint = ai.lock_timepoint
-                            white_output_with_max_locktime = output
-                    else:
-                        other_outputs.append(output)
-                elif ai.addr_type == 'funding':
-                    if ai.addresses[0] == white_pkh or (ai.addresses[1] == white_pkh and ai.addresses[2] == white_pkh):
-                        white_change_outputs.append(output)
-                    else:
-                        other_outputs.append(output)
-                elif ai.addr_type in ['ab_minting', 'ab_minting_ex']:
-                    if ai.addresses[0] == white_pkh or (ai.addresses[1] == white_pkh and ai.addresses[2] == white_pkh):
-                        white_locked_outputs.append(output)
-                        if not white_output_with_max_locktime or ai.lock_timepoint > max_lock_timepoint:
-                            max_lock_timepoint = ai.lock_timepoint
-                            white_output_with_max_locktime = output
+                        # if not white_output_with_max_amount or ai.lock_timepoint > max_lock_timepoint:
+                        if not white_output_with_max_amount or output.amount > max_locked_amount:
+                            max_locked_amount = output.amount
+                            timepoint_of_max_locked_amount = ai.lock_timepoint
                     else:
                         other_outputs.append(output)
                 else:
@@ -652,127 +624,45 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
 
             white_locked_outputs_count = len(white_locked_outputs)
             white_change_outputs_count = len(white_change_outputs)
-            if RULES_VERSION == 2:
-                Verify(white_locked_outputs_count <= white_inputs_count, 'white_locked_outputs_count > white_inputs_count')
-                Verify(white_change_outputs_count <= 1, 'white_change_outputs_count > 1')
-            else:
-                Verify(white_locked_outputs_count + white_change_outputs_count <= white_inputs_count + 2, 'white_outputs_count > white_inputs_count + 2')
-            Verify(white_locked_outputs_count + white_change_outputs_count >= 1, 'white_locked_outputs_count == white_change_outputs_count == 0')
+            Verify(white_locked_outputs_count + white_change_outputs_count >= 1, 'user_locked_outputs_count == user_change_outputs_count == 0')
             white_input_amount = sum(inp.prev_out.amount for inp in white_inputs)
             white_locked_output_amount = sum(outp.amount for outp in white_locked_outputs)
             white_change_output_amount = sum(outp.amount for outp in white_change_outputs)
-            white_output_amount = white_locked_output_amount + white_change_output_amount
-            white_amount_with_max_locktime = white_output_with_max_locktime.amount if white_output_with_max_locktime else white_change_output_amount
             other_output_amounts = [outp.amount for outp in other_outputs]
             other_output_amount_sum = sum(other_output_amounts)
-            other_output_amount_max = max(other_output_amounts)
-            Verify(white_locked_output_amount <= white_input_amount, 'white_locked_output_amount > white_input_amount')
-
             reward_got = other_output_amount_sum
             locked_period = 0
 
-            if RULES_VERSION == 1:
-                reward_calc = ToCoins(white_output_amount * percent)
-                Verify(0, 'too old RULES_VERSION!')
-            elif RULES_VERSION == 2:
-                reward_calc = ToCoins(white_locked_output_amount * percent)
-                Verify(0, 'too old RULES_VERSION!')
-            elif RULES_VERSION == 3:
-                if max_lock_timepoint:
-                    locked_period = max_lock_timepoint - vrftx.time
-                    reward_calc = ToCoins(ToSatoshi(white_amount_with_max_locktime * percent) * locked_period // 3600 // 24 // 365)
-                else:
-                    reward_calc = ToCoins(white_amount_with_max_locktime * percent)
-                reward_got = other_output_amount_max
+            Verify(RULES_VERSION == 4, f'Invalid RULES_VERSION: {RULES_VERSION}')
+            if timepoint_of_max_locked_amount:
+                locked_period = timepoint_of_max_locked_amount - vrftx.time
+                reward_calc = ToCoins(ToSatoshi(max_locked_amount * percent) * locked_period // 3600 // 24 // 365)
             else:
-                Verify(0, 'invalid RULES_VERSION')
+                reward_calc = 0
 
             max_fee = Decimal(10)
             indent3 = indent2 + 1
-            print(' ' * indent2 * 2 + 'Minting 3.0/funding calculation:')
-            print(' ' * indent3 * 2 + 'RULES_VERSION: {}'.format(RULES_VERSION))
+            print(' ' * indent2 * 2 + 'Minting 3.0 calculation:')
+            print(' ' * indent3 * 2 + f'RULES_VERSION: {RULES_VERSION}')
             print(' ' * indent3 * 2 + 'red address: {}'.format(AddressFromPubkeyHash(user_pkhs[0], TESTNET)))
-            print(' ' * indent3 * 2 + 'white address: {}'.format(AddressFromPubkeyHash(white_pkh, TESTNET)))
-            print(' ' * indent3 * 2 + 'white_input_amount: {}'.format(white_input_amount))
-            print(' ' * indent3 * 2 + 'white_locked_output_amount: {}'.format(white_locked_output_amount))
-            print(' ' * indent3 * 2 + 'white_change_output_amount: {}'.format(white_change_output_amount))
-            print(' ' * indent3 * 2 + 'white_amount_with_max_locktime: {}'.format(white_amount_with_max_locktime))
-            print(' ' * indent3 * 2 + 'max_lock_timepoint: {}, locked_period: {} ({}d, {}y)'.format(max_lock_timepoint, locked_period, round(locked_period/3600/24, 2), round(locked_period/3600/24/365, 2)))
-            print(' ' * indent3 * 2 + 'other_output_amount_sum: {}'.format(other_output_amount_sum))
-            print(' ' * indent3 * 2 + 'other_output_amount_max: {}'.format(other_output_amount_max))
-            print(' ' * indent3 * 2 + 'percent: {} (or {} %)'.format(percent, percent * 100))
-            print(' ' * indent3 * 2 + 'reward_calc: {}'.format(reward_calc))
-            print(' ' * indent3 * 2 + 'reward_got: {}'.format(reward_got))
+            print(' ' * indent3 * 2 + 'user address: {}'.format(AddressFromPubkeyHash(white_pkh, TESTNET)))
+            print(' ' * indent3 * 2 + f'user_input_amount: {white_input_amount}')
+            print(' ' * indent3 * 2 + f'user_locked_output_amount: {white_locked_output_amount}')
+            print(' ' * indent3 * 2 + f'user_change_output_amount: {white_change_output_amount}')
+            print(' ' * indent3 * 2 + f'max_locked_user_amount: {max_locked_amount}')
+            print(' ' * indent3 * 2 + 'timepoint_of_max_locked_amount: {}, locked_period: {} ({}d, {}y)'.format(timepoint_of_max_locked_amount, locked_period, round(locked_period/3600/24, 4), round(locked_period/3600/24/365, 4)))
+            print(' ' * indent3 * 2 + f'other_output_amount_sum: {other_output_amount_sum}')
+            print(' ' * indent3 * 2 + f'percent: {percent} (or {percent * 100} %)')
+            print(' ' * indent3 * 2 + f'reward_calc: {reward_calc}')
+            print(' ' * indent3 * 2 + f'reward_got: {reward_got}')
             print(' ' * indent3 * 2 + 'ratio calculated/got: {}'.format(round(reward_calc / reward_got, 4)))
-            print(' ' * indent3 * 2 + 'moneybox_input_amount: {}'.format(moneybox_input_amount))
-            print(' ' * indent3 * 2 + 'moneybox_output_amount: {}'.format(moneybox_output_amount))
-            if RULES_VERSION == 3:
-                Verify(reward_got <= reward_calc, 'robbery!')
-                # print(' ' * indent3 * 2 + 'moneybox_fee: {}'.format(moneybox_input_amount - moneybox_output_amount - reward_got))
-                # Verify(moneybox_input_amount - moneybox_output_amount <= reward_got + max_fee, 'moneybox robbery!')
-                pass
-            else:
-                Verify(0, 'bad RULES_VERSION')
-        else:
-            usermoney_inputs_si = [inp for inp in vrftx.inputs if PKHFromScript(inp.prev_out.scriptPubKey) == user_pkhs[0]]
-            usermoney_outputs_si = [outp for outp in vrftx.outputs if PKHFromScript(outp.scriptPubKey) == user_pkhs[0]]
-            usermoney_inputs_mu = [inp for inp in vrftx.inputs if ca3_cert_out.cert.multisig_sh and SHFromScript(inp.prev_out.scriptPubKey) == ca3_cert_out.cert.multisig_sh]
-            usermoney_outputs_mu = [outp for outp in vrftx.outputs if ca3_cert_out.cert.multisig_sh and SHFromScript(outp.scriptPubKey) == ca3_cert_out.cert.multisig_sh]
-            Verify((len(usermoney_inputs_si) > 0) + (len(usermoney_inputs_mu) > 0) == 1, 'no user inputs or both singlesig and multisig user inputs got ({}, {})'.format(len(usermoney_inputs_si), len(usermoney_inputs_mu)))
-            Verify((len(usermoney_outputs_si) > 0) + (len(usermoney_outputs_mu) > 0) == 1,'no user outputs or both singlesig and multisig user outputs got')
-            Verify((len(usermoney_inputs_si) > 0) + (len(usermoney_outputs_mu) > 0) == 1,'both singlesig and multisig user inputs/outputs got')
-            singlesig = len(usermoney_inputs_si) > 0
-            usermoney_inputs = usermoney_inputs_si if len(usermoney_inputs_si) > 0 else usermoney_inputs_mu
-            usermoney_outputs = usermoney_outputs_si if len(usermoney_outputs_si) > 0 else usermoney_outputs_mu
-            usermoney_inputs_cnt = len(usermoney_inputs)
-            usermoney_outputs_cnt = len(usermoney_outputs)
-            Verify(usermoney_outputs_cnt <= usermoney_inputs_cnt, 'usermoney_outputs ({}) > usermoney_inputs ({})'.format(usermoney_outputs_cnt, usermoney_inputs_cnt))
-            Verify(usermoney_outputs_cnt >= 1, 'no usermoney_outputs, tx: {}'.format(vrftx))
-            time_now = vrftx.time
-            # Calculate reward:
-            green_flag = bool(root_cert_out.cert.flags & FAST_MINTING)
-            user_input_amount = sum(inp.prev_out.amount for inp in usermoney_inputs)
-            user_output_amount = sum(outp.amount for outp in usermoney_outputs)
-            Verify(user_output_amount >= user_input_amount, 'user_output_amount ({}) < user_input_amount ({})'.format(user_output_amount, user_input_amount))
-            ben_outputs = [outp for outp in vrftx.outputs if ben_pkh is not None and PKHFromScript(outp.scriptPubKey) == ben_pkh]
-            other_outputs = [outp for outp in vrftx.outputs if outp not in usermoney_outputs and outp not in moneybox_outputs and outp not in ben_outputs]
-            Verify(len(ben_outputs) + len(other_outputs) <= usermoney_outputs_cnt, 'Too many ben and other outputs: {} + {} > {}'.format(len(ben_outputs), len(other_outputs), usermoney_outputs_cnt))
-            user_pays_fee = len(other_outputs) > 0
-            ben_and_other_outputs = ben_outputs + other_outputs
-            ben_amount = sum(outp.amount for outp in ben_outputs)
-            other_amount = sum(outp.amount for outp in other_outputs)
-            ben_and_other_amount = sum(outp.amount for outp in ben_and_other_outputs)
-            for usermoney_input in usermoney_inputs:
-                Verify(usermoney_input.prev_out.time is not None, 'missing -txindex or usermoney input transaction not in block')
-                Verify(usermoney_input.prev_out.time < time_now, 'invalid age of user input: {} ({}) >= {} ({})'.format(usermoney_input.prev_out.time, time_str(usermoney_input.prev_out.time), time_now, time_str(time_now)))
-            usermoney_ages = [time_now - usermoney_input.prev_out.time for usermoney_input in usermoney_inputs]
-            Verify(ca3_cert_out.time < time_now, 'invalid age of ca3 cert: {} ({}) >= {} ({})'.format(ca3_cert_out.time, time_str(ca3_cert_out.time), time_now, time_str(time_now)))
-            ca3_age = time_now - ca3_cert_out.time
-            Verify(ca3_cert_out.cert.exp_date is None or ca3_cert_out.cert.exp_date + 23*3600 >= time_now, 'ca3 cert is expired')
-            reward_calc = calc_reward(usermoney_inputs, usermoney_ages, ca3_age, green_flag, percent)
-            reward_got = user_output_amount + ben_and_other_amount - user_input_amount
-            Verify(ca3_cert_out.cert.minting_limit is None or ca3_cert_out.cert.minting_limit >= reward_got, 'reward_got > minting_limit')
-            Verify(ca3_cert_out.cert.daily_limit is None or ca3_cert_out.cert.daily_limit >= user_input_amount, 'user_input_amount > daily_limit')
-            indent3 = indent2 + 1
-            print(' ' * indent2 * 2 + 'Minting calculation:')
-            print(' ' * indent3 * 2 + 'sigmodel: {}'.format('singlesig' if singlesig else 'multisig'))
-            print(' ' * indent3 * 2 + 'minting for address: {}'.format(AddressFromPubkeyHash(user_pkhs[0], TESTNET) if singlesig else AddressFromScriptHash(ca3_cert_out.cert.multisig_sh, TESTNET)))
-            print(' ' * indent3 * 2 + 'user_input_amount: {}'.format(user_input_amount))
-            print(' ' * indent3 * 2 + 'user_output_amount: {}'.format(user_output_amount))
-            print(' ' * indent3 * 2 + 'ben_amount: {}'.format(ben_amount))
-            print(' ' * indent3 * 2 + 'other_amount: {}'.format(other_amount))
-            print(' ' * indent3 * 2 + 'ca3_age: {} (or {} h, or {} days)'.format(ca3_age, round(ca3_age / 3600, 2), round(ca3_age / 3600 / 24, 2)))
-            for i, usermoney_age in enumerate(usermoney_ages):
-                print(' ' * indent3 * 2 + 'usermoney_age[{}]: {} (or {} h, or {} days)'.format(i, usermoney_age, round(usermoney_age / 3600, 2), round(usermoney_age / 3600 / 24, 2)))
-            print(' ' * indent3 * 2 + 'green_flag: {}'.format(green_flag))
-            print(' ' * indent3 * 2 + 'percent: {} (or {} %)'.format(percent, percent * 100))
-            print(' ' * indent3 * 2 + 'user_pays_fee: {}'.format(user_pays_fee))
-            print(' ' * indent3 * 2 + 'reward amount calculated: {}'.format(reward_calc))
-            print(' ' * indent3 * 2 + 'reward amount got: {}'.format(reward_got))
-            print(' ' * indent3 * 2 + 'reward ratio calculated/got: {}'.format(round(reward_calc / reward_got, 4) if reward_got else 'INDEFINITE'))
+            print(' ' * indent3 * 2 + f'moneybox_input_amount: {moneybox_input_amount}')
+            print(' ' * indent3 * 2 + f'moneybox_output_amount: {moneybox_output_amount}')
+            print(' ' * indent3 * 2 + f'moneybox_fee: {moneybox_input_amount - moneybox_output_amount - reward_got}')
             Verify(reward_got <= reward_calc, 'robbery!')
-            if reward_calc != reward_got and (not reward_got or reward_calc / reward_got >= 1.1):
-                print(' ' * indent3 * 2 + 'too high generosity ratio!!!')
+            Verify(moneybox_input_amount - moneybox_output_amount <= reward_got + max_fee, 'moneybox robbery!')
+        else:
+            Verify(0, 'old minting v1 is removed')
         vrftx.cert_txs.append(root_cert_vrftx)
         vrftx.cert_txs.append(ca3_cert_vrftx)
         vrftx.mint_calculated = True
@@ -818,7 +708,7 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
     elif txtype == 'return':
         Verify(False, 'Forbidden to reference on return output type')
     else:
-        Verify(False, 'trying to spend unknown or not implemented output type: {}'.format(txtype))
+        Verify(False, f'trying to spend unknown or not implemented output type: {txtype}')
 
 
 def calc_reward(user_inputs, usermoney_ages, ca3_age, green_flag, percent):
@@ -871,7 +761,7 @@ def verify_output(output, vrftx, indent = 0, print_time = False):
 def verify_cert(output, vrftx, indent = 0):
     (parts, rest) = ExtractPartFromScript(output.scriptPubKey, 3)
     if len(parts) != 3:
-        print('  ' * indent + 'invalid certificate structure, less than 3 operands, got: {}'.format(len(parts)))
+        print('  ' * indent + f'invalid certificate structure, less than 3 operands, got: {len(parts)}')
         return
     block1 = parts[0]
     block2 = parts[1]
@@ -903,17 +793,17 @@ def verify_cert(output, vrftx, indent = 0):
         block1_len_expected += 20
     if flags & HAS_EXPIRATION_DATE:
         exdate = struct.unpack("<I", block1[block1_len_expected:block1_len_expected+4])[0]
-        details.append('  ' * indent + 'exp date: {} ({})'.format(exdate, time_str(exdate)))
+        details.append('  ' * indent + f'exp date: {exdate} ({time_str(exdate)})')
         output.cert.exp_date = exdate
         block1_len_expected += 4
     if flags & HAS_MINTING_LIMIT:
         limit = struct.unpack("<q", block1[block1_len_expected:block1_len_expected + 8])[0]
-        details.append('  ' * indent + 'minting limit: {}'.format(ToCoins(limit)))
+        details.append('  ' * indent + f'minting limit: {ToCoins(limit)}')
         output.cert.minting_limit = limit
         block1_len_expected += 8
     if flags & HAS_DAILY_LIMIT:
         limit = struct.unpack("<q", block1[block1_len_expected:block1_len_expected + 8])[0]
-        details.append('  ' * indent + 'daily limit: {}'.format(ToCoins(limit)))
+        details.append('  ' * indent + f'daily limit: {ToCoins(limit)}')
         output.cert.daily_limit = limit
         block1_len_expected += 8
     if flags & HAS_OTHER_DATA:
@@ -925,7 +815,7 @@ def verify_cert(output, vrftx, indent = 0):
     for d in details:
         print(d)
     print('  ' * indent + 'keys: N = {} ({}), M = {} ({})'.format(output.cert.total_keys(), output.cert.total_keys_orig(), output.cert.required_keys(), output.cert.required_keys_orig()))
-    print('  ' * indent + 'is root cert: {}'.format(output.cert.is_root_cert()))
+    print('  ' * indent + f'is root cert: {output.cert.is_root_cert()}')
     Verify(len(block1) >= block1_len_expected, f'block1 invalid structure, expected: {block1_len_expected}, got: {len(block1)}')
     block1_hash = hash256(block1)
     recovered_pubkey = recover_public_key(block1_hash, block2, True)
@@ -986,8 +876,8 @@ this_block_stat = StatBC517()
 this_month_stat = StatBC517()
 
 
-def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, print_stat_517 = False):
-    origin_raw_tx = None
+def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, print_stat_517 = False, raw_tx = None):
+    origin_raw_tx = raw_tx
 
     # some tx:
     #origin_raw_tx = '0200000002f743f57b1d62f68136b4eed6c50365f176e2e2d9d9a3ab2546e7307fb629776f02000000b0473044022051120563679aee53e0cfec9876fec7609ed613a436da670acb930fea49efb69402202f33400806ea6dca133a000bf0f613b066588f6a5727cd5975b85898997902b7012102e3ca9d4377d8afa97f6cda10d0b9398f18a22db0516e604f1c723cfc561d70b820901a1ed334bb6046b501ef0722b1943af800af7d7aa5eecc30e354b8bc6feb6c51205e306d312a9a992b9309e93d8d0df0f529fed7117145a4cce031f57caa80670d5101c0ffffffff1689e40d040b1a330ecd0ea11f7bca5d80a5a99fbf631c1989685a9514e0acac000000006a47304402202ae9bbfe8ebec7088eda24841316308fd385d183cf92909c6f8c4dc61c949f550220123d3d9551b396be9002205c533258da5d5468d7fc9cb29989a1e883fa62ec22012102e3ca9d4377d8afa97f6cda10d0b9398f18a22db0516e604f1c723cfc561d70b8ffffffff03004e7253000000001976a91415c9c6621ff988129c51ca6b46f396fd06631e4a88ac0a679200000000001976a9142dee4de7a3fffde26e0dc6f075b149eb51c1ade988ac50feb3320000000017a9140d37a6fe661c22c9a39e0404dc0306afefec75bd8700000000'
@@ -1025,7 +915,7 @@ def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, 
     Verify(len(vrfTx.inputs) > 0, 'no inputs')
     Verify(len(vrfTx.outputs) > 0, 'no outputs')
     coinbase_inputs_cnt = sum([inp.is_coinbase == True for inp in vrfTx.inputs])
-    Verify(coinbase_inputs_cnt == 0 or len(vrfTx.inputs) == 1, 'coinbase tx must have 1 input, {} got'.format(len(vrfTx.inputs)))
+    Verify(coinbase_inputs_cnt == 0 or len(vrfTx.inputs) == 1, f'coinbase tx must have 1 input, {len(vrfTx.inputs)} got')
     is_coinbase = vrfTx.inputs[0].is_coinbase
     total_amount_in = sum(input.prev_out.amount for input in vrfTx.inputs)
     total_amount_out = sum(output.amount for output in vrfTx.outputs)
@@ -1034,9 +924,9 @@ def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, 
     Verify(is_coinbase or moneybox_amount_in == 0 or moneybox_amount_in > moneybox_amount_out, 'moneybox_amount_in ({}) <= moneybox_amount_out ({})'.format(moneybox_amount_in, moneybox_amount_out))
     moneybox_spent = moneybox_amount_in - moneybox_amount_out
     fee = total_amount_in - total_amount_out
-    print('  ' * indent + 'Total input amount: {}'.format(total_amount_in))
-    print('  ' * indent + 'Total output amount: {}'.format(total_amount_out))
-    print('  ' * indent + 'Tx moneybox spent: {}'.format(moneybox_spent))
+    print('  ' * indent + f'Total input amount: {total_amount_in}')
+    print('  ' * indent + f'Total output amount: {total_amount_out}')
+    print('  ' * indent + f'Tx moneybox spent: {moneybox_spent}')
     print('  ' * indent + 'Tx fee: {}, {} PLCU/KB'.format(fee if not is_coinbase else None, satoshi_round(fee * 1024 / vrfTx.size) if not is_coinbase and vrfTx.size > 0 else None))
     print('  ' * indent + 'Tx time: {} ({})'.format(vrfTx.time, time_str(vrfTx.time)))
     Verify(is_coinbase or block_fee is None, 'internal error: invalid usage of block_fee ({})'.format(block_fee))
@@ -1069,10 +959,11 @@ def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, 
         print('  ' * indent + 'Block fee: {}'.format(block_fee))
         Verify(moneybox_amount_in == 0, 'non-zero moneybox_amount_in ({}) in coinbase tx'.format(moneybox_amount_in))
         if block_moneybox_spent is not None:
-            Verify(moneybox_amount_out == block_moneybox_spent, 'moneybox_amount_out ({}) != block_moneybox_spent ({})'.format(moneybox_amount_out, block_moneybox_spent))
+            Verify(moneybox_amount_out == block_moneybox_spent, f'moneybox_amount_out ({moneybox_amount_out}) != block_moneybox_spent ({block_moneybox_spent})')
         if block_fee is not None:
             pure_amount_out = total_amount_out - moneybox_amount_out
-            Verify(pure_amount_out == max(Decimal('0.005'), satoshi_round(block_fee / 2)), 'wrong miner reward: block_fee: {}, pure_amount_out: {}'.format(block_fee, pure_amount_out))
+            subsidy = ToCoins(get_subsidy(vrfTx.mined_in_block_num, ToSatoshi(block_fee), 'testnet' if TESTNET else 'main'))
+            Verify(pure_amount_out == subsidy, f'wrong miner reward: block: {vrfTx.mined_in_block_num}, block_fee: {block_fee}, subsidy expected: {subsidy}, pure_amount_out (subsidy got): {pure_amount_out}')
     return (fee, moneybox_spent, moneybox_amount_in == 0)
 
 
@@ -1176,7 +1067,7 @@ def calc_flow_in_tx(tx_id, print_func = print):
             next_amount = satoshi_round(str(vout['value']))
             print_func('    {} in coinbase, vout {}'.format(next_amount, vout['n']))
             amount += next_amount
-    print_func('    amount in tx: {}'.format(amount))
+    print_func(f'    amount in tx: {amount}')
     return amount
 
 
@@ -1187,7 +1078,7 @@ def calc_flow_in_block(block_height, print_func = print):
     amount = 0
     for txid in block['tx']:
         amount += calc_flow_in_tx(txid, print_func)
-    print_func('  amount in block: {}'.format(amount))
+    print_func(f'  amount in block: {amount}')
     return (len(block['tx']), amount)
 
 
@@ -1198,72 +1089,26 @@ def calc_flow_in_blocks(block_from, block_to, print_func = print):
         (this_tx_count, this_amount) = calc_flow_in_block(i, print_func)
         tx_count += this_tx_count
         amount += this_amount
-        print_func('  summary tx_count: {}, amount: {}'.format(tx_count, amount))
-    print('Final result in block range [{},{}]: tx_count = {}, amount = {}'.format(block_from, block_to, tx_count, amount))
+        print_func(f'  summary tx_count: {tx_count}, amount: {amount}')
+    print(f'Final result in block range [{block_from},{block_to}]: tx_count = {tx_count}, amount = {amount}')
 
 
 def determine_testnet():
     block_hash_0 = call_func('getblockhash', [0])
-    BLOCKHASH0_TEST = '37a749bbaddeb18e1abd1a86c2087152f2b399a62c47d14fbd75cbc7b24c27af'
-    BLOCKHASH0_PROD = '4769e9264d0c9214e2bd1c741a22dad2bc099d989441dccc2a31a7a8dee2ac9c'
+    BLOCKHASH0_TEST = '83b43792fc6255e24d471ce91e4d2a31de74280990ce8ff220c04227864d5377'
+    BLOCKHASH0_PROD = 'f596cf825f5833b7e30243d12c6164bd26db5fba05af08c498c886ff843158dd'
     assert (block_hash_0 == BLOCKHASH0_TEST or block_hash_0 == BLOCKHASH0_PROD)
     global TESTNET
     TESTNET = (block_hash_0 == BLOCKHASH0_TEST)
-    print('TESTNET: {}'.format(TESTNET))
+    print(f'TESTNET: {TESTNET}')
 
 
 def main():
     determine_testnet()
-
-    # calc_flow_in_blocks(736176,764605) # 1 Apr - 1 May 2020
-    # calc_flow_in_blocks(764606, 789406)  # 1 May - 26 May 2020
-    # calc_flow_in_blocks(764606, 794417)  # 1 May - 1 June 2020
+    # verify_tx(None, raw_tx='020000000491aaad965fdc252d9d6da95ddb41d9a1d113c47aa9ec12f0af24c54de0d4a2c30f000000b04730440220435c79eb4349a1ddea938f871f47d3056616305bb0e92e2902517fbd7afe5b34022045de1054fb530a0540aefb72b2e61e78c4c7ba008a729323575a8b9982e4e7ad012102e57c1391698b2c0774035ec4021764e57250ec3bf0a85a4516abe72b9c1ba7242055d2307d1c068994fe27add5ead1696973fdadcde7151c6d71cc280e062de8b800209afb67886aec416c728b0e74178218e7858f858e589a8eed0d8954323a038ea10001c0ffffffff9070a918f75c5904dc28c2c38cdcfb91fabb9d107dc434ad816b6dd181b5cb1809000000b047304402207caf571269858f7f79c65dc1f209e7c67af860d8b0e6a6d62f830be54b1f23a0022011f55d5f6d2c3b0e2794a076009201bb7583edc38590aa4389e447e4ab71c466012102e57c1391698b2c0774035ec4021764e57250ec3bf0a85a4516abe72b9c1ba7242055d2307d1c068994fe27add5ead1696973fdadcde7151c6d71cc280e062de8b800209afb67886aec416c728b0e74178218e7858f858e589a8eed0d8954323a038ea10001c0ffffffff23735f8dbd5f14ac2bb62a8a92ed039671b25fddc6c6445e89202f4a6e87ea47000000006a47304402205660d3401302ca52f7c20d198dfac9b611c2a5cf3dc91a7f98b8cd3eb1b2b76802204981b0d2404007a70e01039102ef2c8a7413eb413210f880b79ce4aad816e46e0121028485769eed8eb5f3ded11f722e20b5b289ce73c6f9e1b062d468fabbd6cb8ca6ffffffff6789836c02c93364fdf9ecfdfeb63e83d97608cbc532d3fe9c98ef13d8fc11fc000000006b483045022100e3c1e611bcf36fac46b790768af3db0ef66ee2afc621b85c49351cfaf339cf0c022077ea20562ce2e343f3f14466ba7432994f2343cd09f04e36bf03576315af73880121028485769eed8eb5f3ded11f722e20b5b289ce73c6f9e1b062d468fabbd6cb8ca6ffffffff1000e1f5050000000020042612af61b17576a914b619c6b71f149d266dfde7bf4eed3acf03c1d7de88acc00f780300000000200435dbad61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200455f7ad61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f78030000000020047513ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004952fae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004b54bae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004d567ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004f583ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200415a0ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200435bcae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200455d8ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200475f4ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f78030000000020049510af61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88ac00badb00000000001976a9147e8d5abc0c1910fd3fcbb74617cb6ca9bf784aca88ac00dd6d000000000017a9148296da5ca015c76181754a475b0677012cf63960873439e03c0200000017a9140d37a6fe661c22c9a39e0404dc0306afefec75bd8700000000')
+    # verify_tx('ec5c421228f95b2e51505c44e526465dd164ce1e5b5a2bbc7413dfc89b67e94e')
     # return
 
-    # TIMESTAMP = 1577836800  # 1 Jan 2020
-    # TIMESTAMP = 1580515200  # 1 Feb 2020
-    # TIMESTAMP = 1585699200  # 1 Apr 2020
-    # TIMESTAMP = 1588291200  # 1 May 2020
-    # TIMESTAMP = 1590969600  # 1 Jun 2020
-    # TIMESTAMP = 1598918400  # 1 Sep 2020
-    # find_block_with_timestamp(TIMESTAMP, 100, call_func('getblockcount', []))
-    # return
-
-    # pure multisig:
-    # verify_tx('767e51ddf1c417111c90229e71c029b70c10ce8497a21ed883a152ab4ddc9239')
-    # 2 user inputs:
-    # verify_tx('70319012a9bcb63e1ab3544dbde0e23eb6c9736498004eef3dd27094ad9d41e6')
-    # p2pk:
-    # verify_tx('08d379d00b9910e47a24abb201b128d0e7358870c2ffb00c0fcd766d2a02d89d')
-    # too high generosity ratio:
-    # verify_tx('5be43fb5cad539f0d8e3cc290e459149ef5270b604e721e4f3e0ff55b3fc6380')
-    # Funding example tx from https://confluence.global-fintech.com/display/BLOC/Funding+TX
-    # verify_tx('9b6f25bf7d935e9b3ff51785950a99be71a0142108e85a678d7de160d3fd33fc')
-    # Funding tx:
-    # verify_tx('672765bc90b219383a3e7adf33c9aea3f2e750374457bf119d19800a4e3e9066')
-    # With blacklist:
-    # verify_tx('b1bfb021c5ad45053323952175e0cbf738d42721e897822fc98c1577ca583c47')
-    # p2sh output
-    # verify_tx('50f8a0e5425d79222dcf521699e0d8e292548c55b819c5f20f06b57c31c13b7e')
-    # spending p2sh output, minting multisig:
-    # verify_tx('ec25e75ae1126ff35985b876690dd46835f46692e0736980f540cf63331e5291')
-    # spending funding_multisig
-    # verify_tx('01b545dd1c4249992f9b2f2ef976f9388bb792bf3ffac5314466f9edcb683127')
-    # mainnet, user pays fee:
-    # verify_tx('3a583a5f0515c5e6744243e6fa80540248acc6d02babe5de6f41831e5314b42d', print_stat_517=True)
-    # verify_tx('64ce2dc9c6135b809c13518d07e1a2f6c742f7a4c980c408f008ea316ea35e07')  # testnet, ab-minting
-    # verify_tx('8b6792d79cac30fb7c9776ce362007aec7ee7a8c0803179a66d189eecb3acd25')  # user-multisig
-    # verify_tx('ec326a1f7dcb3da570c411481c8643b03882730da473a294c35f500d80952dda')  # funding
-    # verify_tx('f4f0122a5fd7ac2a481829bff7b7f27a94549d7920e20f5c9cbd827b0b674603') # main, ab_minting input
-    # verify_tx('56256f3ff46ca96940fbd0c766eafc8f8c088cc1c87f90047d5fb05f3d2a895f') # main, ab_minting_ex input
-    # verify_tx('2e827ffa1a5959eb6ebdf160ee53c706ef047bfe530cdf86009cc6d6e126d72d') # main, funding input
-    # verify_tx('d7792b3f143962267b9c8ee503cae7f60c079365a0346a2aee6b56b02ac2256d') # main, only funding inputs
-
-
-    # next_hash = 'f42cca790d62a14eba00ed4dd282b5f8d97cc8d94762dda96566fbdb3d993c49' # mainnet, the first block Jan 2020
-    # next_hash = 'c5d15c286b5aa22b8467f3dd15c97e3201219a78fc067a62f44e5c19f085a5a6' # mainnet, the first block Feb 2020
-    # next_hash = '57b3fd679279b143de7814192471863caebd147ec5973241845f5f2a1df2e88f' # mainnet, the first block Jun 2020
-    # next_hash = 'b962c886850f599984dde9708801ed2e952b0a4fd401ffb2859f436b454723fa' # mainnet, the first block Sep 2020
     next_hash = None
     walk_over_blocks(next_hash)
 
@@ -1272,4 +1117,4 @@ if __name__ == '__main__':
     try:
         main()
     except VerificationError as e:
-        print('FAILED: {}'.format(e))
+        print(f'FAILED: {e}')

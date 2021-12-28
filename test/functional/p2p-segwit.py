@@ -224,8 +224,11 @@ class SegWitTest(BitcoinTestFramework):
         # Now check that unnecessary witnesses can't be used to blind a node
         # to a transaction, eg by violating standardness checks.
         tx2 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx.vout[0].nValue-100000))
         tx2.vin.append(CTxIn(COutPoint(tx.sha256, 0), b""))
-        tx2.vout.append(CTxOut(tx.vout[0].nValue-100000, scriptPubKey))
+        tx2.vout.append(CTxOut(ToSatoshi(rest), scriptPubKey))
+        tx2.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx2.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx2.rehash()
         self.test_node.test_transaction_acceptance(tx2, False, True)
         self.nodes[0].generate(1)
@@ -251,8 +254,11 @@ class SegWitTest(BitcoinTestFramework):
 
         # Now create a new anyone-can-spend utxo for the next test.
         tx4 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx3.vout[0].nValue - 100000))
         tx4.vin.append(CTxIn(COutPoint(tx3.sha256, 0), CScript([p2sh_program])))
-        tx4.vout.append(CTxOut(tx3.vout[0].nValue-100000, CScript([OP_TRUE])))
+        tx4.vout.append(CTxOut(ToSatoshi(rest), CScript([OP_TRUE])))
+        tx4.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx4.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx4.rehash()
         self.test_node.test_transaction_acceptance(tx3, False, True)
         self.test_node.test_transaction_acceptance(tx4, False, True)
@@ -880,11 +886,15 @@ class SegWitTest(BitcoinTestFramework):
         witness_hash = sha256(witness_program)
         scriptPubKey = CScript([OP_0, witness_hash])
         tx2 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx.vout[0].nValue - 100000))
         tx2.vin.append(CTxIn(COutPoint(tx_hash, 0), b""))
-        tx2.vout.append(CTxOut(tx.vout[0].nValue-100000, scriptPubKey))
+        tx2.vout.append(CTxOut(ToSatoshi(rest), scriptPubKey))
+        tx2.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx2.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx2.rehash()
 
         tx3 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx2.vout[0].nValue - 100000))
         tx3.vin.append(CTxIn(COutPoint(tx2.sha256, 0), b""))
         tx3.wit.vtxinwit.append(CTxInWitness())
 
@@ -892,7 +902,9 @@ class SegWitTest(BitcoinTestFramework):
         p2sh_program = CScript([OP_TRUE])
         p2sh_pubkey = hash160(p2sh_program)
         witness_program2 = CScript([b'a'*400000])
-        tx3.vout.append(CTxOut(tx2.vout[0].nValue-100000, CScript([OP_HASH160, p2sh_pubkey, OP_EQUAL])))
+        tx3.vout.append(CTxOut(ToSatoshi(rest), CScript([OP_HASH160, p2sh_pubkey, OP_EQUAL])))
+        tx3.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx3.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx3.wit.vtxinwit[0].scriptWitness.stack = [witness_program2]
         tx3.rehash()
 
@@ -903,7 +915,7 @@ class SegWitTest(BitcoinTestFramework):
         self.std_node.test_transaction_acceptance(tx3, True, False, b'tx-size')
 
         # Remove witness stuffing, instead add extra witness push on stack
-        tx3.vout[0] = CTxOut(tx2.vout[0].nValue-100000, CScript([OP_TRUE]))
+        tx3.vout[0] = CTxOut(ToSatoshi(rest), CScript([OP_TRUE]))
         tx3.wit.vtxinwit[0].scriptWitness.stack = [CScript([CScriptNum(1)]), witness_program ]
         tx3.rehash()
 
@@ -1046,8 +1058,11 @@ class SegWitTest(BitcoinTestFramework):
 
         # First prepare a p2sh output (so that spending it will pass standardness)
         p2sh_tx = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(self.utxo[0].nValue - 100000))
         p2sh_tx.vin = [CTxIn(COutPoint(self.utxo[0].sha256, self.utxo[0].n), b"")]
-        p2sh_tx.vout = [CTxOut(self.utxo[0].nValue-100000, p2sh_scriptPubKey)]
+        p2sh_tx.vout = [CTxOut(ToSatoshi(rest), p2sh_scriptPubKey)]
+        p2sh_tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        p2sh_tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         p2sh_tx.rehash()
 
         # Mine it on test_node to create the confirmed output.
@@ -1058,9 +1073,12 @@ class SegWitTest(BitcoinTestFramework):
         # Now test standardness of v0 P2WSH outputs.
         # Start by creating a transaction with two outputs.
         tx = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(p2sh_tx.vout[0].nValue - 1000000), ToCoins(800000))
         tx.vin = [CTxIn(COutPoint(p2sh_tx.sha256, 0), CScript([witness_program]))]
-        tx.vout = [CTxOut(p2sh_tx.vout[0].nValue-1000000, scriptPubKey)]
-        tx.vout.append(CTxOut(800000, scriptPubKey)) # Might burn this later
+        tx.vout = [CTxOut(ToSatoshi(rest), scriptPubKey)]
+        tx.vout.append(CTxOut(800000, scriptPubKey))  # Might burn this later
+        tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx.rehash()
 
         self.std_node.test_transaction_acceptance(tx, with_witness=True, accepted=segwit_activated)
@@ -1070,8 +1088,11 @@ class SegWitTest(BitcoinTestFramework):
         tx2 = CTransaction()
         if segwit_activated:
             # if tx was accepted, then we spend the second output.
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(700000))
             tx2.vin = [CTxIn(COutPoint(tx.sha256, 1), b"")]
-            tx2.vout = [CTxOut(700000, scriptPubKey)]
+            tx2.vout = [CTxOut(ToSatoshi(rest), scriptPubKey)]
+            tx2.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+            tx2.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
             tx2.wit.vtxinwit.append(CTxInWitness())
             tx2.wit.vtxinwit[0].scriptWitness.stack = [witness_program]
         else:
@@ -1088,16 +1109,22 @@ class SegWitTest(BitcoinTestFramework):
             # tx and tx2 were both accepted.  Don't bother trying to reclaim the
             # P2PKH output; just send tx's first output back to an anyone-can-spend.
             sync_mempools([self.nodes[0], self.nodes[1]])
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx.vout[0].nValue - 100000))
             tx3.vin = [CTxIn(COutPoint(tx.sha256, 0), b"")]
-            tx3.vout = [CTxOut(tx.vout[0].nValue-100000, CScript([OP_TRUE]))]
+            tx3.vout = [CTxOut(ToSatoshi(rest), CScript([OP_TRUE]))]
+            tx3.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+            tx3.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
             tx3.wit.vtxinwit.append(CTxInWitness())
             tx3.wit.vtxinwit[0].scriptWitness.stack = [witness_program]
             tx3.rehash()
             self.test_node.test_transaction_acceptance(tx3, with_witness=True, accepted=True)
         else:
             # tx and tx2 didn't go anywhere; just clean up the p2sh_tx output.
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(p2sh_tx.vout[0].nValue - 100000))
             tx3.vin = [CTxIn(COutPoint(p2sh_tx.sha256, 0), CScript([witness_program]))]
-            tx3.vout = [CTxOut(p2sh_tx.vout[0].nValue-100000, witness_program)]
+            tx3.vout = [CTxOut(ToSatoshi(rest), witness_program)]
+            tx3.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+            tx3.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
             tx3.rehash()
             self.test_node.test_transaction_acceptance(tx3, with_witness=True, accepted=True)
 
@@ -1139,8 +1166,11 @@ class SegWitTest(BitcoinTestFramework):
             count += 1
             # First try to spend to a future version segwit scriptPubKey.
             scriptPubKey = CScript([CScriptOp(version), witness_hash])
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(self.utxo[0].nValue - 100000))
             tx.vin = [CTxIn(COutPoint(self.utxo[0].sha256, self.utxo[0].n), b"")]
-            tx.vout = [CTxOut(self.utxo[0].nValue-100000, scriptPubKey)]
+            tx.vout = [CTxOut(ToSatoshi(rest), scriptPubKey)]
+            tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+            tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
             tx.rehash()
             self.std_node.test_transaction_acceptance(tx, with_witness=True, accepted=False)
             self.test_node.test_transaction_acceptance(tx, with_witness=True, accepted=True)
@@ -1155,8 +1185,11 @@ class SegWitTest(BitcoinTestFramework):
         # are non-standard
         scriptPubKey = CScript([CScriptOp(OP_1), witness_hash])
         tx2 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx.vout[0].nValue - 100000))
         tx2.vin = [CTxIn(COutPoint(tx.sha256, 0), b"")]
-        tx2.vout = [CTxOut(tx.vout[0].nValue-100000, scriptPubKey)]
+        tx2.vout = [CTxOut(ToSatoshi(rest), scriptPubKey)]
+        tx2.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx2.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx2.wit.vtxinwit.append(CTxInWitness())
         tx2.wit.vtxinwit[0].scriptWitness.stack = [ witness_program ]
         tx2.rehash()
@@ -1175,14 +1208,17 @@ class SegWitTest(BitcoinTestFramework):
             tx3.wit.vtxinwit.append(CTxInWitness())
             total_value += i.nValue
         tx3.wit.vtxinwit[-1].scriptWitness.stack = [witness_program]
-        tx3.vout.append(CTxOut(total_value - 100000, CScript([OP_TRUE])))
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(total_value - 100000))
+        tx3.vout.append(CTxOut(ToSatoshi(rest), CScript([OP_TRUE])))
+        tx3.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx3.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx3.rehash()
         # Spending a higher version witness output is not allowed by policy,
         # even with fRequireStandard=false.
         self.test_node.test_transaction_acceptance(tx3, with_witness=True, accepted=False)
         self.test_node.sync_with_ping()
         with mininode_lock:
-            assert(b"reserved for soft-fork upgrades" in self.test_node.last_message["reject"].reason)
+            assert_in(b"reserved for soft-fork upgrades", self.test_node.last_message["reject"].reason)
 
         # Building a block with the transaction must be valid, however.
         block = self.build_next_block()
@@ -1242,8 +1278,11 @@ class SegWitTest(BitcoinTestFramework):
         # First create a witness output for use in the tests.
         assert(len(self.utxo))
         tx = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(self.utxo[0].nValue - 100000))
         tx.vin.append(CTxIn(COutPoint(self.utxo[0].sha256, self.utxo[0].n), b""))
-        tx.vout.append(CTxOut(self.utxo[0].nValue-100000, scriptPubKey))
+        tx.vout.append(CTxOut(ToSatoshi(rest), scriptPubKey))
+        tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx.rehash()
 
         self.test_node.test_transaction_acceptance(tx, with_witness=True, accepted=True)
@@ -1426,8 +1465,11 @@ class SegWitTest(BitcoinTestFramework):
 
         # Fund the P2SH output
         tx = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(self.utxo[0].nValue - 100000))
         tx.vin.append(CTxIn(COutPoint(self.utxo[0].sha256, self.utxo[0].n), b""))
-        tx.vout.append(CTxOut(self.utxo[0].nValue-100000, scriptPubKey))
+        tx.vout.append(CTxOut(ToSatoshi(rest), scriptPubKey))
+        tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx.rehash()
 
         # Verify mempool acceptance and block validity
@@ -1439,8 +1481,11 @@ class SegWitTest(BitcoinTestFramework):
 
         # Now test attempts to spend the output.
         spend_tx = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx.vout[0].nValue - 100000))
         spend_tx.vin.append(CTxIn(COutPoint(tx.sha256, 0), scriptSig))
-        spend_tx.vout.append(CTxOut(tx.vout[0].nValue-100000, CScript([OP_TRUE])))
+        spend_tx.vout.append(CTxOut(ToSatoshi(rest), CScript([OP_TRUE])))
+        spend_tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        spend_tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         spend_tx.rehash()
 
         # This transaction should not be accepted into the mempool pre- or
@@ -1697,8 +1742,11 @@ class SegWitTest(BitcoinTestFramework):
         scriptWSH = CScript([OP_0, witness_hash])
 
         tx2 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx.vout[0].nValue - 100000))
         tx2.vin.append(CTxIn(COutPoint(tx.sha256, 0), b""))
-        tx2.vout.append(CTxOut(tx.vout[0].nValue-100000, scriptWSH))
+        tx2.vout.append(CTxOut(ToSatoshi(rest), scriptWSH))
+        tx2.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx2.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         script = GetP2PKHScript(pubkeyhash)
         sig_hash = SegwitVersion1SignatureHash(script, tx2, 0, SIGHASH_ALL, tx.vout[0].nValue)
         signature = key.sign(sig_hash) + b'\x01' # 0x1 is SIGHASH_ALL
@@ -1721,8 +1769,11 @@ class SegWitTest(BitcoinTestFramework):
         scriptSig = CScript([scriptWSH])
 
         tx3 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx2.vout[0].nValue - 100000))
         tx3.vin.append(CTxIn(COutPoint(tx2.sha256, 0), b""))
-        tx3.vout.append(CTxOut(tx2.vout[0].nValue-100000, scriptP2SH))
+        tx3.vout.append(CTxOut(ToSatoshi(rest), scriptP2SH))
+        tx3.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx3.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx3.wit.vtxinwit.append(CTxInWitness())
         sign_P2PK_witness_input(witness_program, tx3, 0, SIGHASH_ALL, tx2.vout[0].nValue, key)
 
@@ -1738,8 +1789,11 @@ class SegWitTest(BitcoinTestFramework):
         # Send it to a P2PKH output, which we'll use in the next test.
         scriptPubKey = GetP2PKHScript(pubkeyhash)
         tx4 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx3.vout[0].nValue - 100000))
         tx4.vin.append(CTxIn(COutPoint(tx3.sha256, 0), scriptSig))
-        tx4.vout.append(CTxOut(tx3.vout[0].nValue-100000, scriptPubKey))
+        tx4.vout.append(CTxOut(ToSatoshi(rest), scriptPubKey))
+        tx4.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx4.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         tx4.wit.vtxinwit.append(CTxInWitness())
         sign_P2PK_witness_input(witness_program, tx4, 0, SIGHASH_ALL, tx3.vout[0].nValue, key)
 
@@ -1752,8 +1806,11 @@ class SegWitTest(BitcoinTestFramework):
         # Test 4: Uncompressed pubkeys should still be valid in non-segwit
         # transactions.
         tx5 = CTransaction()
+        (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(tx4.vout[0].nValue - 100000))
         tx5.vin.append(CTxIn(COutPoint(tx4.sha256, 0), b""))
-        tx5.vout.append(CTxOut(tx4.vout[0].nValue-100000, CScript([OP_TRUE])))
+        tx5.vout.append(CTxOut(ToSatoshi(rest), CScript([OP_TRUE])))
+        tx5.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx5.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         (sig_hash, err) = SignatureHash(scriptPubKey, tx5, 0, SIGHASH_ALL)
         signature = key.sign(sig_hash) + b'\x01' # 0x1 is SIGHASH_ALL
         tx5.vin[0].scriptSig = CScript([signature, pubkey])

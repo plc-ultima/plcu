@@ -45,7 +45,9 @@ class MempoolCoinbaseTest(BitcoinTestFramework):
         spend_103_raw = create_tx(self.nodes[0], coinbase_txids[3], node0_address, Decimal('0.004'))
 
         # Create a transaction which is time-locked to two blocks in the future
-        timelock_tx = self.nodes[0].createrawtransaction([{"txid": coinbase_txids[0], "vout": 0}], {node0_address: Decimal('0.004')})
+        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('0.004'))
+        timelock_tx = self.nodes[0].createrawtransaction([{"txid": coinbase_txids[0], "vout": 0}],
+                                                         {node0_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
         # Set the time lock
         tx_version = struct.unpack("<i", hex_str_to_bytes(timelock_tx[:8]))[0]
         timelock_tx = timelock_tx.replace("ffffffff", "11111191", 1)

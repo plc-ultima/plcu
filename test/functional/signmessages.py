@@ -21,7 +21,7 @@ class SignMessagesTest(BitcoinTestFramework):
         message = 'This is just a test message'
 
         self.log.info('test signing with priv_key')
-        priv_key_b58 = '97iZgrXojvQRhXa1qqLTZ2hddHfs7BdAi7KtduwNnRmepsV6sEvUKW'
+        priv_key_b58 = 'AwSa9YNVSy7Htw6ovCVp9cuB5jNUPv2isdjGMjYD7c9T8qzGf5yjYwg'
         priv_key_bin = b58decode_chk(priv_key_b58)[3:]
         key = CECKey()
         key.set_secretbytes(priv_key_bin)

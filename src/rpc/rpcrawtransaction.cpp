@@ -13,6 +13,7 @@
 #include "validation.h"
 #include "merkleblock.h"
 #include "net.h"
+#include "plcvalidator.h"
 #include "policy/policy.h"
 #include "policy/rbf.h"
 #include "primitives/transaction.h"
@@ -688,6 +689,8 @@ UniValue combinerawtransaction(const JSONRPCRequest& request)
     return EncodeHexTx(mergedTx);
 }
 
+//******************************************************************************
+//******************************************************************************
 UniValue signrawtransaction(const JSONRPCRequest& request)
 {
 #ifdef ENABLE_WALLET
@@ -900,10 +903,12 @@ UniValue signrawtransaction(const JSONRPCRequest& request)
     // transaction to avoid rehashing.
     const CTransaction txConst(mtx);
     // Sign what we can:
-    for (unsigned int i = 0; i < mtx.vin.size(); i++) {
-        CTxIn& txin = mtx.vin[i];
+    for (unsigned int i = 0; i < mtx.vin.size(); i++)
+    {
+        CTxIn & txin = mtx.vin[i];
         const Coin& coin = view.AccessCoin(txin.prevout);
-        if (coin.IsSpent()) {
+        if (coin.IsSpent())
+        {
             TxInErrorToJSON(txin, vErrors, "Input not found or already spent");
             continue;
         }

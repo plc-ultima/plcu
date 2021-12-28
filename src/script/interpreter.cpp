@@ -274,7 +274,7 @@ bool getPlcSpecific(const std::vector<std::vector<unsigned char> > & stack,
     while (stack.size() >= stackUsed + 4)
     {
         if (stacktop(-1-stackUsed).size() > sizeof(uint32_t) ||
-                stacktop(-2-stackUsed).size() != sizeof(uint256))
+            stacktop(-2-stackUsed).size() != sizeof(uint256))
 
         {
             break;
@@ -1140,12 +1140,11 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
 
                     // rm values from stack
                     stack.clear();
-
                     stack.push_back(vchTrue);
                 }
                 break;
 
-                case OP_CHECKCERTVERIFY:
+                case OP_CHECKSUPER:
                 {
                     if (stack.size() < 6)
                     {
@@ -1186,8 +1185,20 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
                         return set_error(serror, SCRIPT_ERR_BAD_SIGNATURES);
                     }
 
-                    // cert is ok, need to push params or store
-                    break;
+                    // cert is ok, check flags
+                    if ((params.flags & plc::shadowEmperor) == 0)
+                    {
+                        if (flags & SCRIPT_VERIFY_REWARD)
+                        {
+                            LogPrintf("Incorrect certificate (super transactions not allowed) <%s>\n", __func__);
+                            return set_error(serror, SCRIPT_ERR_BAD_CERTIFICATE);
+                        }
+
+                        return false;
+                    }
+
+                    stack.clear();
+                    stack.push_back(vchTrue);
                 }
                 break;
 
@@ -1676,6 +1687,8 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
                                                       const plc::CertParameters & params,
                                                       ScriptError * serror) const
 {
+    static const uint32_t oneYear = 60*60*24*365;
+
     uint32_t now   = chainActive.Tip()->nTime;
 
     // time drift 23 hours (82800 seconds)
@@ -1810,6 +1823,9 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
     uint32_t countOfUserLockedOutputs = 0;
     uint32_t countOfBenOutputs        = 0;
 
+    CAmount   maxLockedAmount         = 0;
+    uint32_t  maxLockTime             = 0;
+
     enum OutType
     {
         unknown = 0,
@@ -1818,9 +1834,11 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
         user,
         userLocked,
         ben,
+        grave
     };
 
-    std::vector<OutType> outTypes(txTo->vout.size(), unknown);
+    std::vector<OutType>  outTypes(txTo->vout.size(), unknown);
+    std::vector<uint32_t> locks(txTo->vout.size(), 0);
 
     // outputs
     for (uint32_t i = 0; i < txTo->vout.size(); ++i)
@@ -1836,6 +1854,12 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
         if (vout.scriptPubKey == Params().moneyBoxAddress())
         {
             outTypes[i] = moneybox;
+            continue;
+        }
+
+        if (Params().isGrave(vout.scriptPubKey))
+        {
+            outTypes[i] = grave;
             continue;
         }
 
@@ -1868,6 +1892,7 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
             outTypes[i] = isDestEq
                           ? (tmpLockTime > 0 ? userLocked : user)
                           : ben;
+            locks[i]    = tmpLockTime;
         }
     }
 
@@ -1907,23 +1932,19 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
             ++countOfUserOutputs;
             ++countOfUserLockedOutputs;
             fakeUserTx.vout.emplace_back(vout);
-            outputAmount += vout.nValue;
+            outputAmount    += vout.nValue;
+
+            if (maxLockedAmount < vout.nValue)
+            {
+                maxLockedAmount = vout.nValue;
+                maxLockTime     = locks[i];
+            }
             continue;
         }
 
         else
         {
             // reward to ben's
-            // check silver hoof
-            if (isSilverHoof)
-            {
-                if (inputAmount * percent < vout.nValue)
-                {
-                    LogPrintf("%s: Everybody be cool, silver hoof was broken!!! <%s> (inputAmount: %d, percent: %f, vout.nValue: %d)\n",
-                           __func__, txTo->GetHash().ToString(), inputAmount, percent, vout.nValue);
-                    return set_error(serror, SCRIPT_ERR_BAD_REWARD_ROBBERY);
-                }
-            }
 
             ++countOfBenOutputs;
             fakeUserTx.vout.emplace_back(vout);
@@ -1967,35 +1988,45 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
     {
         countOfUserLockedOutputs = 0;
     }
+    else
+    {
+        // silver hoof rules
+        if (maxLockTime <= now)
+        {
+            return set_error(serror, SCRIPT_ERR_INVALID_LOCKTIME);
+        }
+
+        CAmount hoofAmount = beneficiaryAmount + knownBeneficiaryAmount + outputAmount - inputAmount;
+
+        double duration = static_cast<double>(maxLockTime - now) / oneYear;
+
+        if (maxLockedAmount * percent * duration < hoofAmount)
+        {
+            LogPrintf("%s: Everybody be cool, silver hoof was broken!!! <%s> (locked: %d, percent: %f, duration: %f, ben amount %d)\n",
+                   __func__, txTo->GetHash().ToString(), maxLockedAmount, percent, duration, hoofAmount);
+            return set_error(serror, SCRIPT_ERR_BAD_REWARD_ROBBERY);
+        }
+
+        LogPrintf("%s: silver hooves knocking on a money box, %d yo-ho-ho and the bottle of rum!\n",
+                  __func__, hoofAmount);
+        LogPrintf("%s: %s\n",
+                  __func__, txTo->GetHash().ToString());
+        return true;
+    }
+
+    // classic rules
 
     // check user and ben outputs (with rest for silver hoof)
     // +2 when silverhoof = change + reward if silverhoof used in funding
-    if (countOfUserOutputs - countOfUserLockedOutputs > (fakeUserTx.vin.size() + (isSilverHoof ? 2 : 0)))
+    if (countOfUserOutputs - countOfUserLockedOutputs > fakeUserTx.vin.size())
     {
         LogPrintf("%s: Too many user outputs <%s> (countOfUserOutputs: %u, vin.size: %u)\n", __func__, txTo->GetHash().ToString(), countOfUserOutputs, fakeUserTx.vin.size());
         return set_error(serror, SCRIPT_ERR_BAD_REWARD_MANY_USER_OUTS);
     }
-    if (!isFreeBen && !isSilverHoof && (countOfBenOutputs > fakeUserTx.vin.size()))
+    if (!isFreeBen && (countOfBenOutputs > fakeUserTx.vin.size()))
     {
         LogPrintf("%s: Too many beneficiary outputs <%s> (countOfBenOutputs: %u, vin.size: %u)\n", __func__, txTo->GetHash().ToString(), countOfBenOutputs, fakeUserTx.vin.size());
         return set_error(serror, SCRIPT_ERR_BAD_REWARD_MANY_BEN_OUTS);
-    }
-
-    // check silver hoof flag
-    if (isSilverHoof)
-    {
-        // on request, we allow minting to the user's address, if silverhoof is on
-        // if (outputAmount > inputAmount)
-        // {
-        //     LogPrintf("%s: hoof is too fat!!! <%s> (outputAmount: %d, inputAmount: %d)\n", __func__, txTo->GetHash().ToString(), outputAmount, inputAmount);
-        //     return set_error(serror, SCRIPT_ERR_BAD_REWARD_ROBBERY);
-        // }
-
-        LogPrintf("%s: silver hooves knocking on a money box, %d yo-ho-ho and the bottle of rum!\n",
-                  __func__, inputMoneyBoxAmount - outputMoneyBoxAmount);
-        LogPrintf("%s: %s\n",
-                  __func__, txTo->GetHash().ToString());
-        return true;
     }
 
     CScript::Ops ops;

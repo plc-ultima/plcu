@@ -45,6 +45,7 @@
 #include "base58.h"
 
 #include <atomic>
+#include <chrono>
 #include <sstream>
 
 #include <boost/algorithm/string/replace.hpp>
@@ -471,10 +472,16 @@ std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
 
     for (const CTxIn & in : vin)
     {
-        const Coin & coin = pcoinsTip->AccessCoin(COutPoint(in.prevout.hash, in.prevout.n));
-        if (coin.IsSpent())
+        Coin coin;
+        COutPoint out(in.prevout.hash, in.prevout.n);
         {
-            continue;
+            LOCK(mempool.cs);
+            CCoinsViewMemPool view(pcoinsTip, mempool);
+            if (!view.GetCoin(out, coin) || mempool.isSpent(out))
+            {
+                LogPrintf("prev out point not found <%s:%n>", HexStr(in.prevout.hash), in.prevout.n);
+                continue;
+            }
         }
 
         const CTxOut & coinsOut = coin.out;
@@ -484,7 +491,8 @@ std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
             continue;
         }
 
-        scripts.insert(coinsOut.scriptPubKey);
+        scripts.insert(CScript(coinsOut.scriptPubKey.begin_skipLeadingData(), coinsOut.scriptPubKey.end()));
+        scripts.insert(CScript(coinsOut.scriptPubKey.begin_skipLockTimeVerify(), coinsOut.scriptPubKey.end()));
     }
 
     CAmount totalOut  = 0;
@@ -497,14 +505,22 @@ std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
             // moneybox, skip
             continue;
         }
-        if (out.scriptPubKey == Params().graveAddress())
+        if (Params().isGrave(out.scriptPubKey))
         {
             // burned coins, skip
             burnedOut += out.nValue;
             continue;
         }
 
-        if (scripts.find(out.scriptPubKey) != scripts.end())
+        CScript tmp(out.scriptPubKey.begin_skipLeadingData(), out.scriptPubKey.end());
+        if (scripts.find(tmp) != scripts.end())
+        {
+            // transfer to self
+            continue;
+        }
+
+        tmp = CScript(out.scriptPubKey.begin_skipLockTimeVerify(), out.scriptPubKey.end());
+        if (scripts.find(tmp) != scripts.end())
         {
             // transfer to self
             continue;
@@ -514,6 +530,110 @@ std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
     }
 
     return {totalOut, burnedOut};
+}
+
+//******************************************************************************
+//******************************************************************************
+bool checkBurnedAmount(const std::vector<CTxIn> & vin,
+                       const std::vector<CTxOut> & vout)
+{
+    std::set<CScript> scripts;
+
+    for (const CTxIn & in : vin)
+    {
+        Coin coin;
+        COutPoint out(in.prevout.hash, in.prevout.n);
+        {
+            LOCK(mempool.cs);
+            CCoinsViewMemPool view(pcoinsTip, mempool);
+            if (!view.GetCoin(out, coin) || mempool.isSpent(out))
+            {
+                LogPrintf("bad-burned, prev out point not found <%s:%n>", HexStr(in.prevout.hash), in.prevout.n);
+                continue;
+            }
+        }
+
+        const CTxOut & coinsOut = coin.out;
+        if (coinsOut.scriptPubKey == Params().moneyBoxAddress())
+        {
+            // minting transaction
+            continue;
+        }
+
+        scripts.insert(CScript(coinsOut.scriptPubKey.begin_skipLeadingData(), coinsOut.scriptPubKey.end()));
+        scripts.insert(CScript(coinsOut.scriptPubKey.begin_skipLockTimeVerify(), coinsOut.scriptPubKey.end()));
+    }
+
+    CAmount totalOut  = 0;
+    std::vector<CTxOut> burned;
+
+    for (const CTxOut & out : vout)
+    {
+        if (out.scriptPubKey == Params().moneyBoxAddress())
+        {
+            // moneybox, skip
+            continue;
+        }
+        if (Params().isGrave(out.scriptPubKey))
+        {
+            burned.emplace_back(out);
+            continue;
+        }
+
+        CScript tmp(out.scriptPubKey.begin_skipLeadingData(), out.scriptPubKey.end());
+        if (scripts.find(tmp) != scripts.end())
+        {
+            // transfer to self
+            continue;
+        }
+
+        tmp = CScript(out.scriptPubKey.begin_skipLockTimeVerify(), out.scriptPubKey.end());
+        if (scripts.find(tmp) != scripts.end())
+        {
+            // transfer to self
+            continue;
+        }
+
+        totalOut += out.nValue;
+    }
+
+    if (totalOut == 0)
+    {
+        // transactions to self
+        return true;
+    }
+
+    for (const std::pair<CScript, double> & itm : Params().graveAddresses())
+    {
+        bool isFound = false;
+        for (const CTxOut & out : burned)
+        {
+            if (std::equal(out.scriptPubKey.begin_skipLeadingData(), out.scriptPubKey.end(), itm.first.begin_skipLeadingData()))
+            {
+                // found, check amount
+                if (out.nValue < static_cast<CAmount>(totalOut * itm.second))
+                {
+                    // bad amount
+                    LogPrintf("bad-burned, must be burned: %d (%.4f%%), transferred: %d, burned: %d\n",
+                              static_cast<CAmount>(totalOut * itm.second), itm.second * 100,
+                              totalOut, out.nValue);
+                    return false;
+                }
+
+                isFound = true;
+                break;
+            }
+        }
+
+        if (!isFound)
+        {
+            // bad burned
+            LogPrintf("bad-burned, <%s> not found\n", HexStr(itm.first));
+            return false;
+        }
+    }
+
+    return true;
 }
 
 //******************************************************************************
@@ -567,6 +687,11 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     LOCK(pool.cs); // protect pool.mapNextTx
     for (const CTxIn &txin : tx.vin)
     {
+        if (txin.prevout.isMarker(supertransaction))
+        {
+            continue;
+        }
+
         auto itConflicting = pool.mapNextTx.find(txin.prevout);
         if (itConflicting != pool.mapNextTx.end())
         {
@@ -665,11 +790,8 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             return state.DoS(0, false, REJECT_NONSTANDARD, "bad-witness-nonstandard", true);
 
         // check burned coins
-        std::pair<CAmount, CAmount> transferred = getTransferAmount(tx.vin, tx.vout);
-        CAmount mustBeBurned = transferred.first * 0.03;
-        if (mustBeBurned > transferred.second)
+        if (!isSuperTx(tx) && !checkBurnedAmount(tx.vin, tx.vout))
         {
-            LogPrintf("bad-burned, must be burned: %d, transferred: %d, burned: %d\n", mustBeBurned, transferred.first, transferred.second);
             return state.DoS(0, false, REJECT_INVALID, "bad-burned", true);
         }
 
@@ -1127,7 +1249,8 @@ bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus
     return true;
 }
 
-CAmount GetBlockSubsidy(int nHeight, const Consensus::Params & consensusParams)
+CAmount GetBlockSubsidy(const int nHeight, const CAmount & nFees,
+                        const Consensus::Params & consensusParams)
 {
     if (nHeight <= consensusParams.countOfInitialAmountBlocks)
     {
@@ -1135,7 +1258,13 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params & consensusParams)
         return 5000 * COIN;
     }
 
-    return 0;
+    else if (nHeight <= consensusParams.defaultFeeReductionBlock)
+    {
+        return std::max<int64_t>(nFees/2, .005 * COIN);
+    }
+
+    // min fee = 0.005 coins, 500000 satoshi
+    return std::max<int64_t>(nFees/2, .00005 * COIN);
 }
 
 bool IsInitialBlockDownload()
@@ -1629,9 +1758,16 @@ enum DisconnectResult
  */
 int ApplyTxInUndo(Coin&& undo, CCoinsViewCache& view, const COutPoint& out)
 {
+    if (out.isMarker(supertransaction))
+    {
+        // no undo for super tx marker
+        return DISCONNECT_OK;
+    }
+
     bool fClean = true;
 
-    if (view.HaveCoin(out)) fClean = false; // overwriting transaction output
+    if (view.HaveCoin(out))
+        fClean = false; // overwriting transaction output
 
     if (undo.nHeight == 0) {
         // Missing undo metadata (height and coinbase). Older versions included this
@@ -2074,13 +2210,8 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
 
-    CAmount blockSubsidy = GetBlockSubsidy(pindex->nHeight, chainparams.GetConsensus());
-    if (blockSubsidy == 0)
-    {
-        // min fee = 0.005 coins, 500000 satoshi
-        blockSubsidy = std::max<int64_t>(nFees/2, .005 * COIN);
-    }
-
+    CAmount totalAmount  = getTotalAmount().first;
+    CAmount blockSubsidy = GetBlockSubsidy(pindex->nHeight, nFees, chainparams.GetConsensus());
     CAmount foundSubsidy = 0;
     CAmount foundAward   = 0;
     int     countOfAward = 0;
@@ -2137,11 +2268,18 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
         nRefill = 1000 * COIN;
     }
 
+    if (totalAmount + nRefill > chainparams.GetConsensus().maxTotalAmount)
+    {
+        nRefill = (totalAmount >= chainparams.GetConsensus().maxTotalAmount) ?
+                    0 :
+                    chainparams.GetConsensus().maxTotalAmount - totalAmount;
+    }
+
     if (foundAward != nRefill)
     {
         return state.DoS(100,
-                         error("ConnectBlock(): invalid PLCU award value in coinbase (actual=%d vs limit=%d, height=%d)",
-                               foundAward, nRefill, pindex->nHeight),
+                         error("ConnectBlock(): invalid PLCU award value in coinbase (actual=%d vs limit=%d, height=%d, total=%d)",
+                               foundAward, nRefill, pindex->nHeight, totalAmount),
                                REJECT_INVALID, "bad-box-amount");
     }
 
@@ -3133,6 +3271,52 @@ static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state,
         return state.DoS(50, false, REJECT_INVALID, "high-hash", false, "proof of work failed");
 
     return true;
+}
+
+std::pair<CAmount, uint32_t> getTotalAmount()
+{
+    CAmount  fullamount = 0;
+    uint32_t count = 0;
+    if (!pcoinsdbview)
+    {
+        // no pcoinsdbview in tests
+        return std::make_pair(fullamount, count);
+    }
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    FlushStateToDisk();
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    std::unique_ptr<CCoinsViewCursor> pcursor(pcoinsdbview->Cursor());
+    for (; pcursor->Valid(); pcursor->Next())
+    {
+        boost::this_thread::interruption_point();
+        COutPoint key;
+        Coin coin;
+        if (pcursor->GetKey(key) && pcursor->GetValue(coin))
+        {
+            const CTxOut & out = coin.out;
+            if (out.IsNull())
+            {
+                continue;
+            }
+
+            fullamount += out.nValue;
+            ++count;
+        }
+    }
+
+    auto t3 = std::chrono::high_resolution_clock::now();
+
+    LogPrintf("Total amount %d (%d utxo items) calculated in %d-%d, %d milliseconds",
+              fullamount, count,
+              std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count(),
+              std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count(),
+              std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t1).count());
+
+    return std::make_pair(fullamount, count);
 }
 
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot)

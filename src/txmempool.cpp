@@ -755,7 +755,6 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
     LOCK(cs);
     std::list<const CTxMemPoolEntry*> waitingOnDependants;
     for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
-        unsigned int i = 0;
         checkTotal += it->GetTxSize();
         innerUsage += it->DynamicMemoryUsage();
         const CTransaction& tx = it->GetTx();
@@ -767,7 +766,13 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
         setEntries setParentCheck;
         int64_t parentSizes = 0;
         int64_t parentSigOpCost = 0;
-        for (const CTxIn &txin : tx.vin) {
+        for (const CTxIn &txin : tx.vin)
+        {
+            if (txin.prevout.isMarker(supertransaction))
+            {
+                // skip markers
+                continue;
+            }
             // Check that every mempool transaction's inputs refer to available coins, or other mempool tx's.
             indexed_transaction_set::const_iterator it2 = mapTx.find(txin.prevout.hash);
             if (it2 != mapTx.end()) {
@@ -786,7 +791,6 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
             assert(it3 != mapNextTx.end());
             assert(it3->first == &txin.prevout);
             assert(it3->second == &tx);
-            i++;
         }
         assert(setParentCheck == GetMemPoolParents(it));
         // Verify ancestor state is correct.

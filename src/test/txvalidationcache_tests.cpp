@@ -47,13 +47,25 @@ BOOST_FIXTURE_TEST_CASE(tx_mempool_block_doublespend, TestChain100Setup)
     spends.resize(2);
     for (int i = 0; i < 2; i++)
     {
+        CAmount amnt = 11*CENT;
+
         spends[i].nVersion = 1;
         spends[i].vin.resize(1);
         spends[i].vin[0].prevout.hash = coinbaseTxns[0].GetHash();
         spends[i].vin[0].prevout.n = 0;
-        spends[i].vout.resize(1);
-        spends[i].vout[0].nValue = 11*CENT;
+
+        std::vector<std::pair<CScript, double> > graves = Params().graveAddresses();
+
+        spends[i].vout.resize(graves.size() + 1);
+
+        spends[i].vout[0].nValue = amnt;
         spends[i].vout[0].scriptPubKey = scriptSubsidy;
+
+        for (uint32_t ii = 0; ii < graves.size(); ++ii)
+        {
+            spends[i].vout[ii + 1].nValue = amnt * graves[ii].second;
+            spends[i].vout[ii + 1].scriptPubKey = graves[ii].first;
+        }
 
         // Sign:
         std::vector<unsigned char> vchSig;

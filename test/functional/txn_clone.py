@@ -4,6 +4,7 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the wallet accounts properly when there are cloned transactions with malleated scriptsigs."""
 
+import struct
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 
@@ -24,7 +25,7 @@ class TxnMallTest(BitcoinTestFramework):
     def run_test(self):
         miner_reward = Decimal('0.005')
         # All nodes should start with starting_balance:
-        starting_balance = 6000000 * 25
+        starting_balance = BASE_CB_AMOUNT * 25
         for i in range(self.num_nodes):
             assert_equal(self.nodes[i].getbalance(), starting_balance)
             self.nodes[i].getnewaddress("")  # bug workaround, coins generated assigned to first getnewaddress!
@@ -35,13 +36,15 @@ class TxnMallTest(BitcoinTestFramework):
         node0_address_foo = self.nodes[0].getnewaddress("foo")
         fund_foo_txid = self.nodes[0].sendfrom("", node0_address_foo, 1219)
         fund_foo_tx = self.nodes[0].gettransaction(fund_foo_txid)
+        burn_foo = -find_burned_amount_in_tx(fund_foo_tx)
 
         node0_address_bar = self.nodes[0].getnewaddress("bar")
         fund_bar_txid = self.nodes[0].sendfrom("", node0_address_bar, 29)
         fund_bar_tx = self.nodes[0].gettransaction(fund_bar_txid)
+        burn_bar = -find_burned_amount_in_tx(fund_bar_tx)
 
         assert_equal(self.nodes[0].getbalance(""),
-                     starting_balance - 1219 - 29 + fund_foo_tx["fee"] + fund_bar_tx["fee"])
+                     starting_balance - 1219 - 29 + fund_foo_tx["fee"] + fund_bar_tx["fee"] - burn_foo - burn_bar)
 
         # Coins are sent to node1_address
         node1_address = self.nodes[1].getnewaddress("from0")
@@ -52,23 +55,39 @@ class TxnMallTest(BitcoinTestFramework):
 
         # Construct a clone of tx1, to be malleated 
         rawtx1 = self.nodes[0].getrawtransaction(txid1,1)
+        outputs_count = 4  # dest, change, burn1, burn2
+        assert_equal(len(rawtx1['vout']), outputs_count)
         clone_inputs = [{"txid":rawtx1["vin"][0]["txid"],"vout":rawtx1["vin"][0]["vout"]}]
         clone_outputs = {rawtx1["vout"][0]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][0]["value"],
-                         rawtx1["vout"][1]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][1]["value"]}
+                         rawtx1["vout"][1]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][1]["value"],
+                         rawtx1["vout"][2]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][2]["value"],
+                         rawtx1["vout"][3]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][3]["value"]}
         clone_locktime = rawtx1["locktime"]
         clone_raw = self.nodes[0].createrawtransaction(clone_inputs, clone_outputs, clone_locktime)
 
         # createrawtransaction randomizes the order of its outputs, so swap them if necessary.
         # output 0 is at version+#inputs+input+sigstub+sequence+#outputs
         # 40 PLCU serialized is 00286bee00000000
+        hex_outputs = {}
         pos0 = 2*(4+1+36+1+4+1)
-        hex40 = "00286bee00000000"
-        output_len = 16 + 2 + 2 * int("0x" + clone_raw[pos0 + 16 : pos0 + 16 + 2], 0)
-        if (rawtx1["vout"][0]["value"] == 40 and clone_raw[pos0 : pos0 + 16] != hex40 or
-            rawtx1["vout"][0]["value"] != 40 and clone_raw[pos0 : pos0 + 16] == hex40):
-            output0 = clone_raw[pos0 : pos0 + output_len]
-            output1 = clone_raw[pos0 + output_len : pos0 + 2 * output_len]
-            clone_raw = clone_raw[:pos0] + output1 + output0 + clone_raw[pos0 + 2 * output_len:]
+        assert_equal(clone_raw[pos0-2:pos0], f'0{outputs_count}')
+        cur_pos = pos0
+        output_len_sum = 0
+        for i in range(outputs_count):
+            output_len = (8 + 1 + int(clone_raw[cur_pos+16:cur_pos+18], 16)) * 2
+            hex_output = clone_raw[cur_pos: cur_pos + output_len]
+            value = struct.unpack("<q", bytearray.fromhex(hex_output[:16]))[0]
+            hex_outputs[value] = hex_output
+            cur_pos += output_len
+            output_len_sum += output_len
+        for i in range(outputs_count):
+            assert_in(ToSatoshi(rawtx1["vout"][i]["value"]), hex_outputs)
+        clone_raw = clone_raw[:pos0] + \
+                    hex_outputs[ToSatoshi(rawtx1["vout"][0]["value"])] + \
+                    hex_outputs[ToSatoshi(rawtx1["vout"][1]["value"])] + \
+                    hex_outputs[ToSatoshi(rawtx1["vout"][2]["value"])] + \
+                    hex_outputs[ToSatoshi(rawtx1["vout"][3]["value"])] + \
+                    clone_raw[pos0 + output_len_sum:]
 
         # Use a different signature hash type to sign.  This creates an equivalent but malleated clone.
         # Don't send the clone anywhere yet
@@ -85,7 +104,7 @@ class TxnMallTest(BitcoinTestFramework):
 
         # Node0's balance should be starting balance, plus 50 PLCU for another
         # matured block, minus tx1 and tx2 amounts, and minus transaction fees:
-        expected = starting_balance + fund_foo_tx["fee"] + fund_bar_tx["fee"]
+        expected = starting_balance + fund_foo_tx["fee"] + fund_bar_tx["fee"] - burn_foo - burn_bar
         if self.options.mine_block: expected += miner_reward
         expected += tx1["amount"] + tx1["fee"]
         expected += tx2["amount"] + tx2["fee"]
@@ -99,7 +118,9 @@ class TxnMallTest(BitcoinTestFramework):
             assert_equal(tx1["confirmations"], 1)
             assert_equal(tx2["confirmations"], 1)
             # Node1's "from0" balance should be both transaction amounts:
-            assert_equal(self.nodes[1].getbalance("from0"), -(tx1["amount"] + tx2["amount"]))
+            burned1 = -find_burned_amount_in_tx(tx1)
+            burned2 = -find_burned_amount_in_tx(tx2)
+            assert_equal(self.nodes[1].getbalance("from0"), -(tx1["amount"] + tx2["amount"]) - burned1 - burned2)
         else:
             assert_equal(tx1["confirmations"], 0)
             assert_equal(tx2["confirmations"], 0)
@@ -143,13 +164,15 @@ class TxnMallTest(BitcoinTestFramework):
         # "" should have starting balance, less funding txes, plus subsidies
         assert_equal(self.nodes[0].getbalance("", 0), starting_balance
                                                                 - 1219
-                                                                + fund_foo_tx["fee"]
+                                                                + fund_foo_tx["fee"] - burn_foo
                                                                 -   29
-                                                                + fund_bar_tx["fee"]
+                                                                + fund_bar_tx["fee"] - burn_bar
                                                                 + miner_reward * 2)
 
         # Node1's "from0" account balance
-        assert_equal(self.nodes[1].getbalance("from0", 0), -(tx1["amount"] + tx2["amount"]))
+        burned1 = -find_burned_amount_in_tx(tx1)
+        burned2 = -find_burned_amount_in_tx(tx2)
+        assert_equal(self.nodes[1].getbalance("from0", 0), -(tx1["amount"] + tx2["amount"]) - burned1 - burned2)
 
 if __name__ == '__main__':
     TxnMallTest().main()

@@ -8,6 +8,7 @@
 #include "base58.h"
 #include "checkpoints.h"
 #include "chain.h"
+#include "core_io.h"
 #include "wallet/coincontrol.h"
 #include "consensus/consensus.h"
 #include "consensus/validation.h"
@@ -17,6 +18,7 @@
 #include "keystore.h"
 #include "validation.h"
 #include "net.h"
+#include "plcvalidator.h"
 #include "policy/fees.h"
 #include "policy/policy.h"
 #include "policy/rbf.h"
@@ -114,6 +116,78 @@ public:
     void operator()(const CNoDestination &none) {}
 };
 
+//******************************************************************************
+// Create wallet with dummy database handle
+//******************************************************************************
+CWallet::CWallet()
+    : dbw(new CWalletDBWrapper())
+{
+    SetNull();
+}
+
+//******************************************************************************
+// Create wallet with passed-in database handle
+//******************************************************************************
+CWallet::CWallet(std::unique_ptr<CWalletDBWrapper> dbw_in)
+    : dbw(std::move(dbw_in))
+{
+    SetNull();
+}
+
+//******************************************************************************
+//******************************************************************************
+CWallet::~CWallet()
+{
+    delete pwalletdbEncryption;
+    pwalletdbEncryption = nullptr;
+}
+
+//******************************************************************************
+//******************************************************************************
+void CWallet::SetNull()
+{
+    nWalletVersion         = FEATURE_BASE;
+    nWalletMaxVersion      = FEATURE_BASE;
+    nMasterKeyMaxID        = 0;
+    pwalletdbEncryption    = nullptr;
+    nOrderPosNext          = 0;
+    nAccountingEntryNumber = 0;
+    nNextResend            = 0;
+    nLastResend            = 0;
+    m_max_keypool_index    = 0;
+    nTimeFirstKey          = 0;
+    fBroadcastTransactions = false;
+    nRelockTime            = 0;
+    fAbortRescan           = false;
+    fScanningWallet        = false;
+
+    std::string fileName;
+    if (!loadTaxFreeCert(m_taxfreePubkeys, m_taxfreeCerts, fileName))
+    {
+        m_taxfreePubkeys.clear();
+        m_taxfreeCerts.clear();
+        LogPrintStr("Cert not loaded - " + fileName + "\n");
+    }
+    else
+    {
+        plc::CertParameters params;
+        if (!plc::Validator().validateChainOfCerts(m_taxfreeCerts, m_taxfreePubkeys, params))
+        {
+            m_taxfreePubkeys.clear();
+            m_taxfreeCerts.clear();
+            LogPrintStr("Invalid cert chain - " + fileName + "\n");
+        }
+        else
+        {
+            LogPrintStr("taxfree cert OK - " + fileName + "\n");
+        }
+    }
+
+    m_taxfreeCertFileName = fileName;
+}
+
+//******************************************************************************
+//******************************************************************************
 const CWalletTx* CWallet::GetWalletTx(const uint256& hash) const
 {
     LOCK(cs_wallet);
@@ -1049,6 +1123,10 @@ bool CWallet::AddToWalletIfInvolvingMe(const CTransactionRef& ptx, const CBlockI
 
         if (pIndex != nullptr) {
             for (const CTxIn& txin : tx.vin) {
+                if (txin.prevout.isMarker(supertransaction))
+                {
+                    continue;
+                }
                 std::pair<TxSpends::const_iterator, TxSpends::const_iterator> range = mapTxSpends.equal_range(txin.prevout);
                 while (range.first != range.second) {
                     if (range.first->second != tx.GetHash()) {
@@ -1912,13 +1990,23 @@ bool CWalletTx::IsTrusted() const
     // Trusted if all inputs are from us and are in the mempool:
     for (const CTxIn& txin : tx->vin)
     {
+        if (txin.prevout.hash == uint256() && txin.prevout.n == 0)
+        {
+            return false;
+        }
+
         // Transactions not sent by us: not trusted
         const CWalletTx* parent = pwallet->GetWalletTx(txin.prevout.hash);
         if (parent == nullptr)
+        {
             return false;
+        }
+
         const CTxOut& parentOut = parent->tx->vout[txin.prevout.n];
         if (pwallet->IsMine(parentOut) != ISMINE_SPENDABLE)
+        {
             return false;
+        }
     }
     return true;
 }
@@ -2581,16 +2669,21 @@ bool CWallet::FundTransaction(CMutableTransaction& tx, CAmount& nFeeRet, int& nC
         return false;
     }
 
-    if (nChangePosInOut != -1) {
-        tx.vout.insert(tx.vout.begin() + nChangePosInOut, wtx.tx->vout[nChangePosInOut]);
+    tx.vout = wtx.tx->vout;
+
+    if (nChangePosInOut != -1)
+    {
+//        tx.vout.insert(tx.vout.begin() + nChangePosInOut, wtx.tx->vout[nChangePosInOut]);
         // we dont have the normal Create/Commit cycle, and dont want to risk reusing change,
         // so just remove the key from the keypool here.
         reservekey.KeepKey();
     }
 
     // Copy output sizes from new transaction; they may have had the fee subtracted from them
-    for (unsigned int idx = 0; idx < tx.vout.size(); idx++)
-        tx.vout[idx].nValue = wtx.tx->vout[idx].nValue;
+//    for (unsigned int idx = 0; idx < tx.vout.size(); idx++)
+//    {
+//        tx.vout[idx].nValue = wtx.tx->vout[idx].nValue;
+//    }
 
     // Add new txins (keeping original txin scriptSig/order)
     for (const CTxIn& txin : wtx.tx->vin)
@@ -2625,32 +2718,53 @@ static CFeeRate GetDiscardRate(const CBlockPolicyEstimator& estimator)
 std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
                                               const std::vector<CTxOut> & vout);
 
-bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet,
-                                int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, bool sign)
+bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
+                                CWalletTx & wtxNew, CReserveKey & reservekey,
+                                CAmount& nFeeRet, int & nChangePosInOut,
+                                std::string & strFailReason,
+                                const CCoinControl & coin_control, bool sign)
 {
-    CAmount nValue = 0;
-    int nChangePosRequest = nChangePosInOut;
+    nFeeRet = 0;
+
+    CAmount      nValue                 = 0;
+    int          nChangePosRequest      = nChangePosInOut;
     unsigned int nSubtractFeeFromAmount = 0;
-    for (const auto& recipient : vecSend)
+    bool         is_taxFree             = (m_taxfreePubkeys.size() > 0 &&
+                                           m_taxfreeCerts.size() > 0);
+
+    // check recipients
     {
-        if (nValue < 0 || recipient.nAmount < 0)
+        if (vecSend.empty())
         {
-            strFailReason = _("Transaction amounts must not be negative");
+            strFailReason = _("Transaction must have at least one recipient");
             return false;
         }
-        nValue += recipient.nAmount;
 
-        if (recipient.fSubtractFeeFromAmount)
-            nSubtractFeeFromAmount++;
-    }
-    if (vecSend.empty())
-    {
-        strFailReason = _("Transaction must have at least one recipient");
-        return false;
-    }
+        for (const auto& recipient : vecSend)
+        {
+            if (Params().isGrave(recipient.scriptPubKey))
+            {
+                strFailReason = _("Address prohibited");
+                return false;
+            }
+
+            if (nValue < 0 || recipient.nAmount < 0)
+            {
+                strFailReason = _("Transaction amounts must not be negative");
+                return false;
+            }
+            nValue += recipient.nAmount;
+
+            if (recipient.fSubtractFeeFromAmount)
+            {
+                ++nSubtractFeeFromAmount;
+            }
+        }
+    } // check recipients
 
     wtxNew.fTimeReceivedIsTxTime = true;
     wtxNew.BindWallet(this);
+
     CMutableTransaction txNew;
 
     // Discourage fee sniping.
@@ -2686,11 +2800,17 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
 
     assert(txNew.nLockTime <= (unsigned int)chainActive.Height());
     assert(txNew.nLockTime < LOCKTIME_THRESHOLD);
-    FeeCalculation feeCalc;
-    CAmount        nFeeNeeded   = 0;
-    CAmount        mustBeBurned = 0;
-    uint32_t       burnedPos    = 0;
-    unsigned int   nBytes       = 0;
+
+    FeeCalculation     feeCalc;
+    CAmount            nFeeNeeded              = 0;
+    std::pair<CAmount, CAmount> transferAmount = std::make_pair(0, 0);
+    CAmount            mustBeBurned            = 0;
+    uint32_t           burnedPos               = 0;
+    unsigned int       nBytes                  = 0;
+    uint32_t           iterations              = 0;
+    constexpr uint32_t maxIterations           = 1024;
+    const std::vector<std::pair<CScript, double> > & graves = Params().graveAddresses();
+
     {
         std::set<CInputCoin> setCoins;
         LOCK2(cs_main, cs_wallet);
@@ -2708,7 +2828,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
             {
                 scriptChange = GetScriptForDestination(coin_control.destChange);
             }
-            else
+            else if (!coin_control.fReturnChangeToAddressFromInputSet)
             {
                 // no coin control: send change to newly generated address
                 // Note: We use a new key here to keep it from being obvious which side is the change.
@@ -2730,107 +2850,53 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
 
                 scriptChange = GetScriptForDestination(vchPubKey.GetID());
             }
+
             CTxOut change_prototype_txout(0, scriptChange);
             size_t change_prototype_size = GetSerializeSize(change_prototype_txout, SER_DISK, 0);
 
             CFeeRate discard_rate = GetDiscardRate(::feeEstimator);
-            nFeeRet = 0;
-            bool pick_new_inputs = true;
-            CAmount nValueIn = 0;
+            nFeeRet               = 0;
+            bool pick_new_inputs  = true;
+            CAmount nValueIn      = 0;
 
             // Start with no fee and loop until there is enough fee
             while (true)
             {
+                if (iterations++ > maxIterations)
+                {
+                    strFailReason = _("Too many iterations");
+                    return false;
+                }
+
                 nChangePosInOut = nChangePosRequest;
                 txNew.vin.clear();
                 txNew.vout.clear();
                 wtxNew.fFromMe = true;
                 bool fFirst = true;
 
-                CAmount nValueToSelect = nValue;
-                if (nSubtractFeeFromAmount == 0)
-                {
-                    nValueToSelect += nFeeRet;
-                }
-
-                // vouts to the payees
-                for (const auto& recipient : vecSend)
-                {
-                    CTxOut txout(recipient.nAmount, recipient.scriptPubKey);
-
-                    if (recipient.fSubtractFeeFromAmount)
-                    {
-                        txout.nValue -= nFeeRet / nSubtractFeeFromAmount; // Subtract fee equally from each selected recipient
-
-                        if (fFirst) // first receiver pays the remainder not divisible by output count
-                        {
-                            fFirst = false;
-                            txout.nValue -= nFeeRet % nSubtractFeeFromAmount;
-                        }
-                    }
-
-                    if (IsDust(txout, ::dustRelayFee))
-                    {
-                        if (recipient.fSubtractFeeFromAmount && nFeeRet > 0)
-                        {
-                            if (txout.nValue < 0)
-                                strFailReason = _("The transaction amount is too small to pay the fee");
-                            else
-                                strFailReason = _("The transaction amount is too small to send after the fee has been deducted");
-                        }
-                        else
-                            strFailReason = _("Transaction amount too small");
-                        return false;
-                    }
-                    txNew.vout.push_back(txout);
-                }
-
                 // Choose coins to use
                 if (pick_new_inputs)
                 {
                     nValueIn = 0;
                     setCoins.clear();
-                    if (!SelectCoins(vAvailableCoins, nValueToSelect, setCoins, nValueIn, &coin_control))
+                    if (!SelectCoins(vAvailableCoins,
+                                     nValue + (nSubtractFeeFromAmount == 0 ? (nFeeRet + mustBeBurned) : 0),
+                                     setCoins, nValueIn, &coin_control))
                     {
                         strFailReason = _("Insufficient funds");
                         return false;
                     }
+                    // TODO fix dummy signature
+                    // if (is_taxFree)
+                    // {
+                    //    setCoins.insert(CInputCoin(COutPoint(uint256(), 0),
+                    //                               CTxOut(0, makeSuperTxScriptPubKey())));
+                    // }
                 }
 
-                const CAmount nChange = nValueIn - nValueToSelect;
-
-                if (nChange > 0)
+                if (coin_control.fReturnChangeToAddressFromInputSet)
                 {
-                    // Fill a vout to ourself
-                    CTxOut newTxOut(nChange, scriptChange);
-
-                    // Never create dust outputs; if we would, just
-                    // add the dust to the fee.
-                    if (IsDust(newTxOut, discard_rate))
-                    {
-                        nChangePosInOut = -1;
-                        nFeeRet += nChange;
-                    }
-                    else
-                    {
-                        if (nChangePosInOut == -1)
-                        {
-                            // Insert change txn at random position:
-                            nChangePosInOut = GetRandInt(txNew.vout.size()+1);
-                        }
-                        else if ((unsigned int)nChangePosInOut > txNew.vout.size())
-                        {
-                            strFailReason = _("Change index out of range");
-                            return false;
-                        }
-
-                        std::vector<CTxOut>::iterator position = txNew.vout.begin()+nChangePosInOut;
-                        txNew.vout.insert(position, newTxOut);
-                    }
-                }
-                else
-                {
-                    nChangePosInOut = -1;
+                    scriptChange = setCoins.begin()->txout.scriptPubKey;
                 }
 
                 // Fill vin
@@ -2850,18 +2916,101 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
                                               nSequence));
                 }
 
+                CAmount fullFee = nFeeRet + mustBeBurned;
+
+                // Fill vout
+                //
+                // vouts to the payees
+                for (const auto & recipient : vecSend)
+                {
+                    CTxOut txout(recipient.nAmount, recipient.scriptPubKey);
+
+                    if (recipient.fSubtractFeeFromAmount)
+                    {
+                        txout.nValue -= fullFee / nSubtractFeeFromAmount; // Subtract fee equally from each selected recipient
+
+                        if (fFirst) // first receiver pays the remainder not divisible by output count
+                        {
+                            fFirst = false;
+                            txout.nValue -= fullFee % nSubtractFeeFromAmount;
+                        }
+                    }
+
+                    if (IsDust(txout, ::dustRelayFee))
+                    {
+                        if (recipient.fSubtractFeeFromAmount && fullFee > 0)
+                        {
+                            if (txout.nValue < 0)
+                                strFailReason = _("The transaction amount is too small to pay the fee");
+                            else
+                                strFailReason = _("The transaction amount is too small to send after the fee has been deducted");
+                        }
+                        else
+                            strFailReason = _("Transaction amount too small");
+                        return false;
+                    }
+                    txNew.vout.push_back(txout);
+                }
+
+                CAmount nChange = nValueIn - nValue;
+
+                if (nChange == 0)
+                {
+                    nChangePosInOut = -1;
+                }
+                else
+                {
+                    // Fill a vout to ourself
+                    CTxOut newTxOut(nChange, scriptChange);
+
+                    // Never create dust outputs; if we would, just
+                    // add the dust to the fee.
+                    if (IsDust(newTxOut, discard_rate))
+                    {
+                        nChangePosInOut = -1;
+                        // nFeeRet += nChange;
+                    }
+                    else
+                    {
+                        if (nChangePosInOut == -1)
+                        {
+                            // Insert change txn at random position:
+                            nChangePosInOut = GetRandInt(txNew.vout.size()+1);
+                        }
+                        else if ((unsigned int)nChangePosInOut > txNew.vout.size())
+                        {
+                            strFailReason = _("Change index out of range");
+                            return false;
+                        }
+
+                        std::vector<CTxOut>::iterator position = txNew.vout.begin() + nChangePosInOut;
+                        txNew.vout.insert(position, newTxOut);
+                    }
+                }
+
                 // burn coins
-                txNew.vout.emplace_back(0, Params().graveAddress());
-                burnedPos = txNew.vout.size() - 1;
+                burnedPos = txNew.vout.size();
+                if (is_taxFree)
+                {
+                    txNew.vin.emplace_back(uint256(), 0);
+                }
+                else
+                {
+                    for (const std::pair<CScript, double> & pairs : graves)
+                    {
+                        txNew.vout.emplace_back(0, pairs.first);
+                    }
+                }
 
                 // Fill in dummy signatures for fee calculation.
                 if (!DummySignTx(txNew, setCoins))
                 {
-                    strFailReason = _("Signing transaction failed");
+                    strFailReason = _("Signing transaction failed (dummy)");
                     return false;
                 }
 
-                nBytes = GetVirtualTransactionSize(txNew);
+                // TODO temporary + 206 bytes - plc cert and signature
+                nBytes = GetVirtualTransactionSize(txNew) + 206;
 
                 // Remove scriptSigs to eliminate the fee calculation dummy signatures
                 for (auto& vin : txNew.vin)
@@ -2880,11 +3029,49 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
                     return false;
                 }
 
-                const std::pair<CAmount, CAmount> transfer = getTransferAmount(txNew.vin, txNew.vout);
+                if (!is_taxFree)
+                {
+                    transferAmount = getTransferAmount(txNew.vin, txNew.vout);
+                    assert(transferAmount.second == 0 && "wrong transfer/burn amount");
+                    if (!coin_control.fReturnChangeToAddressFromInputSet && nSubtractFeeFromAmount == 0)
+                    {
+                        transferAmount.first -= (mustBeBurned + nFeeNeeded);
+                    }
+                    CAmount newBurned = static_cast<CAmount>(transferAmount.first * Params().gravePercent());
+                    if (newBurned != mustBeBurned)
+                    {
+                        // recalc
+                        mustBeBurned = newBurned;
+                        nFeeRet      = nFeeNeeded;
+                        continue;
+                    }
+                }
 
-                mustBeBurned = std::max(transfer.second,
-                                        static_cast<CAmount>(transfer.first * 0.03) - transfer.second);
-                if (nFeeRet >= nFeeNeeded + mustBeBurned)
+                if (nFeeRet == 0 && nSubtractFeeFromAmount > 0)
+                {
+                    nFeeRet = nFeeNeeded;
+                    continue;
+                }
+
+                if (nSubtractFeeFromAmount == 0 && nChange < nFeeNeeded + mustBeBurned)
+                {
+                    if (!pick_new_inputs)
+                    {
+                        // This shouldn't happen, we should have had enough excess
+                        // fee to pay for the new output and still meet nFeeNeeded
+                        // Or we should have just subtracted fee from recipients and
+                        // nFeeNeeded should not have changed
+                        LogPrintf("Transaction fee and change calculation failed (cffa=%s, ctna=%s), nFeeRet: %i, nFeeNeeded: %i, mustBeBurned: %i, transfer: %i %i\n",
+                                  (nSubtractFeeFromAmount == 0) ? "false" : "true",
+                                  coin_control.fReturnChangeToAddressFromInputSet ? "false" : "true",
+                                  nFeeRet, nFeeNeeded, mustBeBurned,
+                                  transferAmount.first, transferAmount.second);
+                        strFailReason = _("Transaction fee and change calculation failed");
+                        return false;
+                    }
+                }
+
+                else // (nChange >= nFeeNeeded + mustBeBurned)
                 {
                     // Reduce fee to only the needed amount if possible. This
                     // prevents potential overpayment in fees if the coins
@@ -2898,10 +3085,11 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
                     // change output. Only try this once.
                     if (nChangePosInOut == -1 && nSubtractFeeFromAmount == 0 && pick_new_inputs)
                     {
-                        unsigned int tx_size_with_change = nBytes + change_prototype_size + 2; // Add 2 as a buffer in case increasing # of outputs changes compact size
+                        // Add 2 as a buffer in case increasing # of outputs changes compact size
+                        unsigned int tx_size_with_change = nBytes + change_prototype_size + 2;
                         CAmount fee_needed_with_change = GetMinimumFee(tx_size_with_change, coin_control, ::mempool, ::feeEstimator, nullptr);
                         CAmount minimum_value_for_change = GetDustThreshold(change_prototype_txout, discard_rate);
-                        if (nFeeRet >= fee_needed_with_change + minimum_value_for_change)
+                        if (nChange >= fee_needed_with_change + minimum_value_for_change + mustBeBurned)
                         {
                             pick_new_inputs = false;
                             nFeeRet = fee_needed_with_change;
@@ -2909,40 +3097,42 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
                         }
                     }
 
-                    // If we have change output already, just increase it
-                    if (nFeeRet > (nFeeNeeded + mustBeBurned) && nChangePosInOut != -1 && nSubtractFeeFromAmount == 0)
+                    // substract burned (if change)
+                    if (nChange > mustBeBurned && nChangePosInOut != -1 && nSubtractFeeFromAmount == 0)
                     {
-                        CAmount extraFeePaid = nFeeRet - nFeeNeeded - mustBeBurned;
-                        std::vector<CTxOut>::iterator change_position = txNew.vout.begin()+nChangePosInOut;
-                        change_position->nValue += extraFeePaid;
-                        nFeeRet -= extraFeePaid;
+                        std::vector<CTxOut>::iterator change_position = txNew.vout.begin() + nChangePosInOut;
+                        change_position->nValue -= mustBeBurned;
+                        nChange -= mustBeBurned;
                     }
-                    break; // Done, enough fee included.
-                }
-                else if (!pick_new_inputs)
-                {
-                    // This shouldn't happen, we should have had enough excess
-                    // fee to pay for the new output and still meet nFeeNeeded
-                    // Or we should have just subtracted fee from recipients and
-                    // nFeeNeeded should not have changed
-                    strFailReason = _("Transaction fee and change calculation failed");
-                    return false;
+
+                    // If we have change output already, just increase it
+                    if (nChange > nFeeNeeded && nChangePosInOut != -1 && nSubtractFeeFromAmount == 0)
+                    {
+                        // CAmount extraFeePaid = nChange - nFeeNeeded;
+                        std::vector<CTxOut>::iterator change_position = txNew.vout.begin() + nChangePosInOut;
+                        change_position->nValue -= nFeeNeeded;
+                        nChange -= nFeeNeeded;
+                    }
+
+                    // Done, enough fee included.
+                    nFeeRet = nFeeNeeded;
+                    break;
                 }
 
                 // Try to reduce change to include necessary fee
-                if (nChangePosInOut != -1 && nSubtractFeeFromAmount == 0)
-                {
-                    CAmount additionalFeeNeeded = nFeeNeeded + mustBeBurned - nFeeRet;
-                    std::vector<CTxOut>::iterator change_position = txNew.vout.begin()+nChangePosInOut;
-                    // Only reduce change if remaining amount is still a large enough output.
-                    if (change_position->nValue >= MIN_FINAL_CHANGE + additionalFeeNeeded)
-                    {
-                        change_position->nValue -= additionalFeeNeeded;
-                        nFeeRet += additionalFeeNeeded;
+//                if (nChangePosInOut != -1 && nSubtractFeeFromAmount == 0)
+//                {
+//                    CAmount additionalFeeNeeded = nFeeNeeded - nFeeRet;
+//                    std::vector<CTxOut>::iterator change_position = txNew.vout.begin()+nChangePosInOut;
+//                    // Only reduce change if remaining amount is still a large enough output.
+//                    if (change_position->nValue >= MIN_FINAL_CHANGE + additionalFeeNeeded)
+//                    {
+//                        change_position->nValue -= additionalFeeNeeded;
+//                        nFeeRet += additionalFeeNeeded;
 
-                        break; // Done, able to increase fee from change
-                    }
-                }
+//                        break; // Done, able to increase fee from change
+//                    }
+//                }
 
                 // If subtracting fee from recipients, we now know what fee we
                 // need to subtract, we have no reason to reselect inputs
@@ -2957,15 +3147,19 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
             }
         }
 
-        if (nChangePosInOut == -1)
+        if (nChangePosInOut == -1 || coin_control.fReturnChangeToAddressFromInputSet)
         {
             // Return any reserved key if we don't have change
             reservekey.ReturnKey();
         }
 
         // burn
+        if (!is_taxFree)
         {
-            txNew.vout[burnedPos].nValue = mustBeBurned;
+            for (const std::pair<CScript, double> & pairs : graves)
+            {
+                txNew.vout[burnedPos++].nValue = transferAmount.first * pairs.second;
+            }
         }
 
         if (sign)
@@ -2976,16 +3170,34 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
             {
                 const CScript& scriptPubKey = coin.txout.scriptPubKey;
                 SignatureData sigdata;
-
                 if (!ProduceSignature(TransactionSignatureCreator(this, &txNewConst, nIn, coin.txout.nValue, SIGHASH_ALL), scriptPubKey, sigdata))
                 {
                     strFailReason = _("Signing transaction failed");
                     return false;
-                } else {
+                }
+                else
+                {
                     UpdateTransaction(txNew, nIn, sigdata);
                 }
 
                 nIn++;
+            }
+
+            if (is_taxFree)
+            {
+                // taxfree marker always in last position
+                const CScript & scriptPubKey = makeSuperTxScriptPubKey();
+
+                SignatureData sigdata;
+                if (!ProduceSignature(TransactionSignatureCreator(this, &txNewConst, txNewConst.vin.size()-1, 0, SIGHASH_ALL), scriptPubKey, sigdata))
+                {
+                    strFailReason = _("Signing super failed");
+                    return false;
+                }
+                else
+                {
+                    UpdateTransaction(txNew, nIn, sigdata);
+                }
             }
         }
 
@@ -3016,14 +3228,16 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
         }
     }
 
-    LogPrintf("Fee Calculation: Fee:%d Bytes:%u Needed:%d Tgt:%d (requested %d) Reason:\"%s\" Decay %.5f: Estimation: (%g - %g) %.2f%% %.1f/(%.1f %d mem %.1f out) Fail: (%g - %g) %.2f%% %.1f/(%.1f %d mem %.1f out)\n",
-              nFeeRet, nBytes, nFeeNeeded, feeCalc.returnedTarget, feeCalc.desiredTarget, StringForFeeReason(feeCalc.reason), feeCalc.est.decay,
+    LogPrintf("Fee Calculation: Fee:%d Burned:%d Bytes:%u Needed:%d Tgt:%d (requested %d) Reason:\"%s\" Decay %.5f: Estimation: (%g - %g) %.2f%% %.1f/(%.1f %d mem %.1f out) Fail: (%g - %g) %.2f%% %.1f/(%.1f %d mem %.1f out) %d iterations\n",
+              nFeeRet, mustBeBurned, nBytes, nFeeNeeded, feeCalc.returnedTarget, feeCalc.desiredTarget, StringForFeeReason(feeCalc.reason), feeCalc.est.decay,
               feeCalc.est.pass.start, feeCalc.est.pass.end,
               100 * feeCalc.est.pass.withinTarget / (feeCalc.est.pass.totalConfirmed + feeCalc.est.pass.inMempool + feeCalc.est.pass.leftMempool),
               feeCalc.est.pass.withinTarget, feeCalc.est.pass.totalConfirmed, feeCalc.est.pass.inMempool, feeCalc.est.pass.leftMempool,
               feeCalc.est.fail.start, feeCalc.est.fail.end,
               100 * feeCalc.est.fail.withinTarget / (feeCalc.est.fail.totalConfirmed + feeCalc.est.fail.inMempool + feeCalc.est.fail.leftMempool),
-              feeCalc.est.fail.withinTarget, feeCalc.est.fail.totalConfirmed, feeCalc.est.fail.inMempool, feeCalc.est.fail.leftMempool);
+              feeCalc.est.fail.withinTarget, feeCalc.est.fail.totalConfirmed, feeCalc.est.fail.inMempool, feeCalc.est.fail.leftMempool,
+              iterations);
+    LogPrintf("Raw: %s\n", EncodeHexTx(*wtxNew.tx));
     return true;
 }
 

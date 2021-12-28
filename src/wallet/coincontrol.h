@@ -23,6 +23,8 @@ public:
     bool fAllowWatchOnly;
     //! Override automatic min/max checks on fee, m_feerate must be set if true
     bool fOverrideFeeRate;
+    //! Return change to address from input set
+    bool fReturnChangeToAddressFromInputSet;
     //! Override the default payTxFee if set
     boost::optional<CFeeRate> m_feerate;
     //! Override the default confirmation target if set
@@ -40,11 +42,12 @@ public:
     void SetNull()
     {
         destChange = CNoDestination();
-        fAllowOtherInputs = false;
-        fAllowWatchOnly = false;
+        fAllowOtherInputs                  = false;
+        fAllowWatchOnly                    = false;
+        fOverrideFeeRate                   = false;
+        fReturnChangeToAddressFromInputSet = false;
         setSelected.clear();
         m_feerate.reset();
-        fOverrideFeeRate = false;
         m_confirm_target.reset();
         signalRbf = fWalletRbf;
         m_fee_mode = FeeEstimateMode::UNSET;

@@ -60,15 +60,15 @@ class PruneTest(BitcoinTestFramework):
 
     def create_big_chain(self):
         # Start by creating some coinbases we can spend later
-        generate_many_blocks(self.nodes[0], 80)
+        generate_many_blocks(self.nodes[0], 96)
         sync_blocks(self.nodes[0:2])
-        generate_many_blocks(self.nodes[1], 120)
+        generate_many_blocks(self.nodes[1], 104)
         sync_blocks(self.nodes[0:2])
 
         fee = Decimal('0.001')
-        self.utxo_cache_0 = create_confirmed_utxos(fee, self.nodes[0], 13580, min_amount=100, gen_blocks_first=False)
+        self.utxo_cache_0 = create_confirmed_utxos(fee, self.nodes[0], 13580, min_amount=15, gen_blocks_first=False)
         sync_blocks(self.nodes[0:2])
-        self.utxo_cache_1 = create_confirmed_utxos(fee, self.nodes[1], 336, min_amount=100, gen_blocks_first=False)
+        self.utxo_cache_1 = create_confirmed_utxos(fee, self.nodes[1], 336, min_amount=15, gen_blocks_first=False)
         sync_blocks(self.nodes[0:2])
         assert_greater_than_or_equal(350, self.nodes[0].getblockcount())
         generate_many_blocks(self.nodes[0], 350 - self.nodes[0].getblockcount())

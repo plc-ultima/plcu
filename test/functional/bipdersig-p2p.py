@@ -39,9 +39,10 @@ def unDERify(tx):
     tx.vin[0].scriptSig = CScript(newscript)
 
 def create_transaction(node, coinbase, to_address, amount):
+    (burn1, burn2, rest) = BurnedAndChangeAmount(amount)
     from_txid = node.getblock(coinbase)['tx'][0]
     inputs = [{ "txid" : from_txid, "vout" : 0}]
-    outputs = { to_address : amount }
+    outputs = { to_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2 }
     rawtx = node.createrawtransaction(inputs, outputs)
     signresult = node.signrawtransaction(rawtx)
     tx = CTransaction()
@@ -70,7 +71,7 @@ class BIP66Test(BitcoinTestFramework):
         self.log.info("Test that a transaction with non-DER signature can still appear in a block")
 
         spendtx = create_transaction(self.nodes[0], self.coinbase_blocks[0],
-                self.nodeaddress, 1.0)
+                self.nodeaddress, Decimal(1))
         unDERify(spendtx)
         spendtx.rehash()
 
@@ -107,7 +108,7 @@ class BIP66Test(BitcoinTestFramework):
         block.nVersion = VB_TOP_BITS
 
         spendtx = create_transaction(self.nodes[0], self.coinbase_blocks[1],
-                self.nodeaddress, 1.0)
+                self.nodeaddress, Decimal(1))
         unDERify(spendtx)
         spendtx.rehash()
 
@@ -143,7 +144,7 @@ class BIP66Test(BitcoinTestFramework):
 
         self.log.info("Test that a version VB_TOP_BITS block with a DERSIG-compliant transaction is accepted")
         block.vtx[1] = create_transaction(self.nodes[0],
-                self.coinbase_blocks[1], self.nodeaddress, 1.0)
+                self.coinbase_blocks[1], self.nodeaddress, Decimal(1))
         block.hashMerkleRoot = block.calc_merkle_root()
         block.rehash()
         block.solve()

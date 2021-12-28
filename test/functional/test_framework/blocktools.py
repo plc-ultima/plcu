@@ -5,27 +5,27 @@
 """Utilities for manipulating blocks and transactions."""
 
 from .mininode import *
-from .script import CScript, OP_TRUE, OP_CHECKSIG, OP_RETURN, OP_HASH160, OP_EQUAL, GetP2SHMoneyboxScript
+from .script import *
 from .util import *
 import binascii
 
 
 def get_moneybox_granularity(height):
-    if height <= 500:
-        return 10 * COIN
-    return 20 * COIN
+    return 100 * COIN
 
 # Create a block (with regtest difficulty)
-def create_block(hashprev, coinbase, nTime=None):
+def create_block(hashprev, coinbase, nTime=None, bits=None, version=None, tx_list=[]):
     block = CBlock()
+    block.nVersion = version if version else 1
     if nTime is None:
         import time
-        block.nTime = int(time.time()+600)
+        block.nTime = int(time.time()+90)
     else:
         block.nTime = nTime
     block.hashPrevBlock = hashprev
-    block.nBits = 0x1f7fffff # Will break after a difficulty adjustment...
+    block.nBits = bits if bits else 0x1f7fffff  # Will break after a difficulty adjustment...
     block.vtx.append(coinbase)
+    block.vtx.extend(tx_list)
     block.hashMerkleRoot = block.calc_merkle_root()
     block.calc_sha256()
     return block
@@ -74,10 +74,17 @@ def serialize_script_num(value):
     return r
 
 
-def get_subsidy(height, minerfees):
+def get_subsidy(height, minerfees, network = 'regtest'):
+    next_height = {
+        'regtest': 2000,
+        'testnet': 119000,
+        'main': 25000,
+    }
     if height <= 100:
-        return 6000000*COIN
-    return max(500000, int(minerfees / 2))  # int(0.005*COIN)
+        return int(BASE_CB_AMOUNT * COIN)
+    elif height <= next_height[network]:
+        return max(500000, int(minerfees / 2))  # int(0.005*COIN)
+    return max(5000, int(minerfees / 2))  # int(0.00005*COIN)
 
 
 def get_plc_award(height, refill_moneybox_amount, granularity):
@@ -126,8 +133,13 @@ def create_coinbase(height, pubkey = None, minerfees = 0, refill_moneybox_amount
 def create_transaction(prevtx, n, sig, value, scriptPubKey=CScript()):
     tx = CTransaction()
     assert(n < len(prevtx.vout))
+    (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(value))
     tx.vin.append(CTxIn(COutPoint(prevtx.sha256, n), sig, 0xffffffff))
-    tx.vout.append(CTxOut(value, scriptPubKey))
+    tx.vout.append(CTxOut(ToSatoshi(rest), scriptPubKey))
+    if burn1:
+        tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+    if burn2:
+        tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
     tx.calc_sha256()
     return tx
 

@@ -95,7 +95,11 @@ public:
     const CScript & moneyBoxAddress() const   { return consensus.moneyBoxAddress; }
 
     /** grave address */
-    const CScript & graveAddress() const   { return consensus.graveAddress; }
+    double gravePercent() const;
+    const std::vector<std::pair<CScript, double> > & graveAddresses() const   { return consensus.graveAddresses; }
+    bool isGrave(const CScript & scriptPubKey) const;
+
+    uint32_t maxCaBlock() const { return consensus.maxCaBlock; }
 
     void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout);
 protected:

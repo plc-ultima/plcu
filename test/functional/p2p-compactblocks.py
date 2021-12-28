@@ -12,7 +12,7 @@ from test_framework.mininode import *
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 from test_framework.blocktools import create_block, create_coinbase, add_witness_commitment
-from test_framework.script import CScript, OP_TRUE
+from test_framework.script import CScript, OP_TRUE, GraveScript1, GraveScript2
 
 VB_TOP_BITS = 0x20000000
 
@@ -260,7 +260,9 @@ class CompactBlocksTest(BitcoinTestFramework):
         # Generate a bunch of transactions.
         num_transactions = 25
         amount_to_send = Decimal('0.1')
-        while node.getbalance() < num_transactions * (amount_to_send + Decimal('0.002')):
+        fee = Decimal('0.002')
+        (burn1, burn2) = GetBurnedValue(amount_to_send)
+        while node.getbalance() < num_transactions * (amount_to_send + fee + burn1 * 3 + burn2 * 3):
             node.generate(1)
         address = node.getnewaddress()
         if use_witness_address:
@@ -268,7 +270,8 @@ class CompactBlocksTest(BitcoinTestFramework):
             # a witness address.
             address = node.addwitnessaddress(address)
             value_to_send = node.getbalance()
-            node.sendtoaddress(address, satoshi_round(value_to_send - Decimal('0.1')))
+            (_, _, rest) = BurnedAndChangeAmount(satoshi_round(value_to_send - Decimal('0.1')))
+            node.sendtoaddress(address, rest)
             node.generate(1)
 
         segwit_tx_generated = False
@@ -430,7 +433,10 @@ class CompactBlocksTest(BitcoinTestFramework):
         for i in range(num_transactions):
             tx = CTransaction()
             tx.vin.append(CTxIn(COutPoint(utxo[0], utxo[1]), b''))
-            tx.vout.append(CTxOut(utxo[2] - 100000, CScript([OP_TRUE])))
+            (burn1, burn2, rest) = BurnedAndChangeAmount(ToCoins(utxo[2] - 100000))
+            tx.vout.append(CTxOut(ToSatoshi(rest), CScript([OP_TRUE])))
+            tx.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+            tx.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
             tx.rehash()
             utxo = [tx.sha256, 0, tx.vout[0].nValue]
             block.vtx.append(tx)

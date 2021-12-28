@@ -22,8 +22,24 @@ from .authproxy import AuthServiceProxy, JSONRPCException
 
 
 COIN = 100000000 # 1 PLCU in satoshis
+BASE_CB_AMOUNT = Decimal(5000)
 DUST_OUTPUT_THRESHOLD = 54000
-GRAVE_ADDRESS = 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk'
+DEFAULT_TX_CONFIRM_TARGET = 6
+GRAVE_ADDRESS_1_TESTNET = 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk'  # P2PKH
+GRAVE_ADDRESS_2_TESTNET = 'U2xG44uNWvbszm6nhwJR9MEf1vz5MPg3MmtoM'  # P2SH(OP_INVALIDOPCODE)
+GRAVE_ADDRESS_1_MAINNET = 'U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho'  # P2PKH
+GRAVE_ADDRESS_2_MAINNET = 'U2xHfRKJx7kiicc4SVeWpgWbX28bNRSt3ACeb'  # P2SH(OP_INVALIDOPCODE)
+VB_TOP_BITS = 0x20000000
+
+GRAVE_ADDRESS_1 = GRAVE_ADDRESS_1_TESTNET
+GRAVE_ADDRESS_2 = GRAVE_ADDRESS_2_TESTNET
+
+ONE_HOUR = 3600
+ONE_DAY = ONE_HOUR * 24
+ONE_MONTH = ONE_DAY * 30
+ONE_YEAR = ONE_DAY * 365
+
+TOTAL_EMISSION_LIMIT = Decimal(1100000)
 
 logger = logging.getLogger("TestFramework.utils")
 
@@ -32,7 +48,7 @@ logger = logging.getLogger("TestFramework.utils")
 
 def assert_fee_amount(fee, tx_size, fee_per_kB):
     """Assert the fee was in range"""
-    target_fee = tx_size * fee_per_kB / 1000
+    target_fee = satoshi_round(tx_size * fee_per_kB / 1000)
     if fee < target_fee:
         raise AssertionError("Fee of %s PLCU too low! (Should be %s PLCU)" % (str(fee), str(target_fee)))
     # allow the wallet's estimation to be at most 2 bytes off
@@ -442,6 +458,19 @@ def find_output(node, txid, amount):
             return i
     raise RuntimeError("find_output txid %s : %s not found" % (txid, str(amount)))
 
+def find_output_by_address(node, address, txid=None, tx_raw=None):
+    """
+    Return index to output of txid with address
+    Raises exception if there is none.
+    """
+    assert txid or tx_raw
+    txdata = tx_raw if tx_raw else node.getrawtransaction(txid, 1)
+    for i in range(len(txdata["vout"])):
+        addresses = txdata["vout"][i]["scriptPubKey"]['addresses']
+        if len(addresses) == 1 and addresses[0] == address:
+            return i
+    raise RuntimeError("find_output_by_address txid %s : %s not found" % (txid, address))
+
 def gather_inputs(from_node, amount_needed, confirmations_required=1):
     """
     Return a random set of unspent txouts that are enough to pay amount_needed
@@ -486,10 +515,11 @@ def random_transaction(nodes, amount, min_fee, fee_increment, fee_variants):
     fee = min_fee + fee_increment * random.randint(0, fee_variants)
 
     (total_in, inputs) = gather_inputs(from_node, amount + fee)
-    (burn, rest) = BurnedAndChangeAmount(total_in - fee, amount)
-    outputs = make_change(from_node, total_in - burn, amount, fee)
+    (burn1, burn2, rest) = BurnedAndChangeAmount(total_in - fee, amount)
+    outputs = make_change(from_node, total_in - burn1 - burn2, amount, fee)
     outputs[to_node.getnewaddress()] = float(amount)
-    outputs[GRAVE_ADDRESS] = burn
+    outputs[GRAVE_ADDRESS_1] = burn1
+    outputs[GRAVE_ADDRESS_2] = burn2
 
     rawtx = from_node.createrawtransaction(inputs, outputs)
     signresult = from_node.signrawtransaction(rawtx)
@@ -519,12 +549,12 @@ def create_confirmed_utxos(fee, node, count, min_amount=None, gen_blocks_first=T
         inputs = []
         inputs.append({"txid": t["txid"], "vout": t["vout"]})
         outputs = {}
-        send_value = t['amount'] - fee
-        send_value_a = satoshi_round(send_value / 2)
-        (burn, send_value_b) = BurnedAndChangeAmount(send_value, send_value_a)
-        outputs[addr1] = send_value_a
-        outputs[addr2] = send_value_b
-        outputs[GRAVE_ADDRESS] = burn
+        (burn1, burn2, send_value) = BurnedAndChangeAmount(t['amount'] - fee)
+        send_value = satoshi_round(send_value / 2)
+        outputs[addr1] = send_value
+        outputs[addr2] = send_value
+        outputs[GRAVE_ADDRESS_1] = burn1
+        outputs[GRAVE_ADDRESS_2] = burn2
         raw_tx = node.createrawtransaction(inputs, outputs)
         signed_tx = node.signrawtransaction(raw_tx)["hex"]
         node.sendrawtransaction(signed_tx)
@@ -546,7 +576,7 @@ def gen_return_txouts():
     for i in range(512):
         script_pubkey = script_pubkey + "01"
     # concatenate 128 txouts of above script_pubkey which we'll insert before the txout for change
-    txouts = "81"
+    txouts = "83" # hex(128) + 2 (burn) + 1 (change)
     for k in range(128):
         # add txout value
         txouts = txouts + "0000000000000000"
@@ -557,8 +587,9 @@ def gen_return_txouts():
     return txouts
 
 def create_tx(node, coinbase, to_address, amount):
+    (burn1, burn2, rest) = BurnedAndChangeAmount(amount)
     inputs = [{"txid": coinbase, "vout": 0}]
-    outputs = {to_address: amount}
+    outputs = {to_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2}
     rawtx = node.createrawtransaction(inputs, outputs)
     signresult = node.signrawtransaction(rawtx)
     assert_equal(signresult["complete"], True)
@@ -575,8 +606,10 @@ def create_lots_of_big_transactions(node, txouts, utxos, num, fee):
         outputs = {}
         if t['amount'] < fee + ToCoins(DUST_OUTPUT_THRESHOLD):
             continue
-        change = t['amount'] - fee
-        outputs[addr] = satoshi_round(change)
+        (burn1, burn2, change) = BurnedAndChangeAmount(t['amount'] - fee)
+        outputs[addr] = change
+        outputs[GRAVE_ADDRESS_1] = burn1
+        outputs[GRAVE_ADDRESS_2] = burn2
         rawtx = node.createrawtransaction(inputs, outputs)
         newtx = rawtx[0:92]
         newtx = newtx + txouts
@@ -634,7 +667,7 @@ def ToSatoshi(amount):
     print('amount: {}, type: {}'.format(amount, type(amount)))
     assert(0)
 
-def generate_many_blocks(node, count, limit_per_call = 100):
+def generate_many_blocks(node, count, limit_per_call = 200):
     logger.info(f'Will generate {count} blocks: {node.getblockcount()} --> {node.getblockcount() + count}')
     assert_greater_than(limit_per_call, 0)
     blocks = []
@@ -656,16 +689,74 @@ def node_listunspent(node, minconf=1, maxconf=9999999, addresses=[], include_uns
         query_options['minimumSumAmount'] = minimumSumAmount
     return node.listunspent(minconf, maxconf, addresses, include_unsafe, query_options)
 
+def find_burned_amount_in_tx(tx):
+    burned = 0
+    outputs = 0
+    for detail in tx['details']:
+        if detail['address'] == GRAVE_ADDRESS_1 or detail['address'] == GRAVE_ADDRESS_2:
+            burned += detail['amount']
+            outputs += 1
+    assert_greater_than(abs(burned), 0)
+    assert_equal(outputs, 2)
+    return burned
+
 # total_out_amount == input_amount - fee
-def BurnedAndChangeAmount(total_out_amount, dest_amount):
+def BurnedAndChangeAmount(total_out_amount, dest_amount = 0):
+    if total_out_amount == 0:
+        return (0, 0, 0)
     assert_greater_than(total_out_amount, dest_amount)
     assert_greater_than_or_equal(dest_amount, 0)
     # percent = 0.03
     # change = total_out_amount / (1 + percent) - dest_amount
     # burn = total_out_amount * percent / (1 + percent)
     change = ToCoins(total_out_amount * 100 / 103 - dest_amount)
-    burn = ToCoins(total_out_amount * 3 / 103)
-    if change + burn < total_out_amount - dest_amount:
-        burn += Decimal('0.00000001')
-    assert_equal(change + burn, total_out_amount - dest_amount)
-    return (burn, change)
+    burn_total = total_out_amount * 3 / 103
+    burn1 = ToCoins(burn_total * 2 / 3)
+    burn2 = ToCoins(burn_total / 3)
+    if change + burn1 + burn2 < total_out_amount - dest_amount and change == 0:
+        change += Decimal('0.00000001')
+    if change + burn1 + burn2 < total_out_amount - dest_amount:
+        burn1 += Decimal('0.00000001')
+    if change + burn1 + burn2 < total_out_amount - dest_amount:
+        burn2 += Decimal('0.00000001')
+    assert_equal(change + burn1 + burn2, total_out_amount - dest_amount)
+    assert_greater_than(change, 0)
+    return (burn1, burn2, change)
+
+def GetBurnedValue(pure_received_amount):
+    assert_greater_than(pure_received_amount, 0)
+    return (satoshi_round(ToCoins(pure_received_amount) * 2 / 100), satoshi_round(ToCoins(pure_received_amount) / 100))
+
+def skip_spam_from_tx(tx_json):
+    del tx_json['hex']
+    vout = tx_json['vout']
+    vout[:] = [x for x in vout if x['scriptPubKey']['type'] != 'nulldata']
+
+def print_tx_verbose(node, txid=None, tx_hex=None, tx_json=None, indent=0, skip_spam=False):
+    assert txid or tx_hex or tx_json
+    tx_json = tx_json if tx_json else (node.decoderawtransaction(tx_hex) if tx_hex else node.getrawtransaction(txid, 1))
+    for input in tx_json['vin']:
+        logger.debug(f'{" " * indent}parent tx: {node.getrawtransaction(input["txid"], 1)}')
+    if skip_spam:
+        skip_spam_from_tx(tx_json)
+    logger.debug(f'{" " * indent}this tx: {tx_json}')
+
+def print_block_verbose(node, block_num=None, hash=None, indent=0):
+    assert block_num or hash
+    hash = hash if hash else node.getblockhash(block_num)
+    block = node.getblock(hash, 1)
+    logger.debug(f'{" "*indent}block {block_num}: {block}')
+    tx_cb = node.getrawtransaction(block['tx'][0], 1)
+    logger.debug(f'{" " * (indent+2)}coinbase tx: {tx_cb}')
+    for txid in block['tx'][1:]:
+        print_tx_verbose(node, txid=txid, indent=indent+2)
+        logger.debug(f'{" " * (indent+2)}---')
+    logger.debug(f'{" " * indent}----- block {block_num}')
+
+def print_mempool_verbose(node, indent=0):
+    mempool = node.getrawmempool()
+    logger.debug(f'{" "*indent}mempool: {mempool}')
+    for txid in mempool:
+        print_tx_verbose(node, txid=txid, indent=indent+2)
+        logger.debug(f'{" " * (indent+2)}---')
+    logger.debug(f'{" " * indent}----- mempool')

@@ -141,7 +141,7 @@ const char* GetOpName(opcodetype opcode)
 
     // PLCU specific
     case OP_CHECKREWARD            : return "OP_CHECKREWARD";
-    case OP_CHECKCERTVERIFY        : return "OP_CHECKCERTVERIFY";
+    case OP_CHECKSUPER             : return "OP_CHECKSUPER";
     case OP_CHECKDESTINATIONVERIFY : return "OP_CHECKDESTINATIONVERIFY";
 
     case OP_INVALIDOPCODE          : return "OP_INVALIDOPCODE";
@@ -312,6 +312,31 @@ CScript::const_iterator CScript::begin_skipLeadingData() const
     }
 
     if (!IsPushOnly(begin(), psave))
+    {
+        return begin();
+    }
+
+    return pcurr;
+}
+
+CScript::const_iterator CScript::begin_skipLockTimeVerify() const
+{
+    const_iterator pcurr = begin();
+
+    opcodetype op;
+    std::vector<unsigned char> vchData;
+
+    if (!GetOp(pcurr, op, vchData) || op > OP_PUSHDATA4)
+    {
+        return begin();
+    }
+
+    if (!GetOp(pcurr, op, vchData) || op != OP_CHECKLOCKTIMEVERIFY)
+    {
+        return begin();
+    }
+
+    if (!GetOp(pcurr, op, vchData) || op != OP_DROP)
     {
         return begin();
     }

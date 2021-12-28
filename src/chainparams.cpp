@@ -94,6 +94,16 @@ CScript makeGraveScriptPubKey(const std::string & graveAddress, const CChainPara
     return GetScriptForDestination(CBitcoinAddress(graveAddress).Get(params));
 }
 
+CScript makeMausoleumScriptPubKey()
+{
+    CScript scr;
+    scr << OP_INVALIDOPCODE;
+    CScriptID id(scr);
+    CScript result;
+    result << OP_HASH160 << ToByteVector(id) << OP_EQUAL;
+    return result;
+}
+
 class CMainParams : public CChainParams {
 public:
     CMainParams() {
@@ -145,7 +155,12 @@ public:
                                                 {{0, 100*COIN}});
 
         consensus.moneyBoxAddress = makeMoneyBoxScriptPubKey();
-        consensus.graveAddress    = makeGraveScriptPubKey("U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho", *this);
+        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho", *this), 0.02),
+                                     std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
+
+        consensus.maxCaBlock                 = 100000;
+        consensus.defaultFeeReductionBlock   = 35000;
+        consensus.maxTotalAmount             = 11000000 * COIN;
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -260,7 +275,12 @@ public:
                                                 {{0, 100*COIN}});
 
         consensus.moneyBoxAddress = makeMoneyBoxScriptPubKey();
-        consensus.graveAddress    = makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this);
+        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this), 0.02),
+                                     std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
+
+        consensus.maxCaBlock                 = 0;
+        consensus.defaultFeeReductionBlock   = 29000;
+        consensus.maxTotalAmount             = 5500000 * COIN;
 
         pchMessageStart[0] = 0xfc;
         pchMessageStart[1] = 0xd1;
@@ -371,7 +391,12 @@ public:
                                                {{0, 100*COIN}});
 
         consensus.moneyBoxAddress = makeMoneyBoxScriptPubKey();
-        consensus.graveAddress    = makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this);
+        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this), 0.02),
+                                     std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
+
+        consensus.maxCaBlock                 = 256;
+        consensus.defaultFeeReductionBlock   = 2000;
+        consensus.maxTotalAmount             = 1100000 * COIN;
 
         pchMessageStart[0] = 0xef;
         pchMessageStart[1] = 0xbe;
@@ -541,4 +566,35 @@ int64_t CChainParams::awardGranularity(const uint32_t height) const
     }
 
     return consensus.granularities.front().second;
+}
+
+//******************************************************************************
+//******************************************************************************
+double CChainParams::gravePercent() const
+{
+    static double percent = [this]()
+    {
+        double sum = 0;
+        for (const auto & item : consensus.graveAddresses)
+        {
+            sum += item.second;
+        }
+        return sum;
+    }();
+
+    return percent;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool CChainParams::isGrave(const CScript & scriptPubKey) const
+{
+    for (const auto & item : consensus.graveAddresses)
+    {
+        if (item.first == scriptPubKey)
+        {
+            return true;
+        }
+    }
+    return false;
 }

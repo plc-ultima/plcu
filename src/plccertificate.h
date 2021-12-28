@@ -54,6 +54,8 @@ struct Certificate
     }
 };
 
+//******************************************************************************
+//******************************************************************************
 // misk flags
 enum
 {
@@ -62,10 +64,13 @@ enum
     hasExpirationDate = 0x00000004,
     hasMintingLimit   = 0x00000008,
     hasMaxload        = 0x00000010,
+    hasBeneficiaryPercent = 0x00000020,
+    hasFreeBenPercent     = 0x00000040,
     hasOtherData      = 0x00000800,
     fastMinting       = 0x00010000,
     freeBen           = 0x00020000,
     silverHoof        = 0x00040000,
+    shadowEmperor     = 0x00080000,
     generalFlags      = 0x0fff0000,
     localFlags        = 0x00000fff,
     pubkeyCountMask   = 0x0000f000,
@@ -99,6 +104,7 @@ struct CertParameters
     uint32_t             requiredCountOfSigs;
     uint160              deviceKeyHash;
     uint160              beneficiaryKeyHash;
+    unsigned int         height;
     unsigned int         blockTimestamp;
     unsigned int         expirationDate;
     CAmount              mintingLimit;
@@ -111,6 +117,7 @@ struct CertParameters
         , percent(0)
         , flags(0)
         , requiredCountOfSigs(0)
+        , height(0)
         , blockTimestamp(0)
         , expirationDate(std::numeric_limits<unsigned int>::max())
         , mintingLimit(std::numeric_limits<CAmount>::max())
@@ -125,6 +132,7 @@ struct CertParameters
         READWRITE(percent);
         READWRITE(flags);
         READWRITE(requiredCountOfSigs);
+        READWRITE(height);
         READWRITE(blockTimestamp);
         READWRITE(expirationDate);
         READWRITE(mintingLimit);

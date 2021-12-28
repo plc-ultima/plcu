@@ -95,7 +95,10 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         inputs = []
         outputs = {}
         inputs.append({"txid" : utxo["txid"], "vout" : utxo["vout"]})
-        outputs[self.nodes[0].getnewaddress()] = utxo["amount"]
+        (burn1, burn2, amount) = BurnedAndChangeAmount(utxo["amount"])
+        outputs[self.nodes[0].getnewaddress()] = amount
+        outputs[GRAVE_ADDRESS_1] = burn1
+        outputs[GRAVE_ADDRESS_2] = burn2
         raw_tx = self.nodes[0].createrawtransaction(inputs, outputs)
         tx_hex = self.nodes[0].signrawtransaction(raw_tx)["hex"]
         tx_id = self.nodes[0].decoderawtransaction(tx_hex)["txid"]

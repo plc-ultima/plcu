@@ -9,6 +9,7 @@
 #include "hash.h"
 #include "random.h"
 #include "pow.h"
+#include "script/standard.h"
 #include "uint256.h"
 #include "util.h"
 #include "ui_interface.h"
@@ -58,11 +59,25 @@ CCoinsViewDB::CCoinsViewDB(size_t nCacheSize, bool fMemory, bool fWipe) : db(Get
 {
 }
 
-bool CCoinsViewDB::GetCoin(const COutPoint &outpoint, Coin &coin) const {
+const static CTxOut superOut(0, makeSuperTxScriptPubKey());
+const static Coin   superCoin(superOut, 32, false);
+
+bool CCoinsViewDB::GetCoin(const COutPoint &outpoint, Coin &coin) const
+{
+    if (outpoint.isMarker(supertransaction))
+    {
+        coin = superCoin;
+        return true;
+    }
     return db.Read(CoinEntry(&outpoint), coin);
 }
 
-bool CCoinsViewDB::HaveCoin(const COutPoint &outpoint) const {
+bool CCoinsViewDB::HaveCoin(const COutPoint &outpoint) const
+{
+    if (outpoint.hash == uint256() && outpoint.n == 0)
+    {
+        return true;
+    }
     return db.Exists(CoinEntry(&outpoint));
 }
 

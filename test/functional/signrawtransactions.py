@@ -6,6 +6,15 @@
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
+from test_framework.key import *
+from test_framework.script import *
+
+
+def scriptPubKeyHexForSecret(secret):
+    key = CECKey()
+    key.set_secretbytes(hex_str_to_bytes(secret))
+    key.set_compressed(True)
+    return bytes_to_hex_str(GetP2PKHScript(hash160(key.get_pubkey())))
 
 
 class SignRawTransactionsTest(BitcoinTestFramework):
@@ -20,17 +29,18 @@ class SignRawTransactionsTest(BitcoinTestFramework):
 
         1) The transaction has a complete set of signatures
         2) No script verification error occurred"""
-        privKeys = ['97iVxAyQhuD4Sv3dX5ua9yuGWCDwcjMJu13aoYgHC2WYvCz6hPvF8J', '97iYzhEw55nnkfQB2UegQL8wpAotzTzHBrjiZUTkbDTAhh8b2qBmhG']
+        privKeys = ['AwSa5beJfAQFnX8pK4rMJvxcnGsvioLw6UobCPgPvFLsyoDSRwUue5z', 'AwSa53S4TqqVghsKaALZ3W4AMsG9a5qWWtuQ1WCk7Rmd6a2xvkRgMQ1']
+        secrets = ['72b12fd1d01ff094544466fe41856a2ec21b38e2eb3d57f8af1e3a6427bf76d1', '621f1bca43fa20752612dd3250ad3265082d7f461a9ae749b6544c30f0745d40']
 
         inputs = [
             # Valid pay-to-pubkey scripts
             {'txid': 'f73ab7aa5c3ffae730f5b11f16550a7cebfe5bb69ff0e7a297f17f799173e574', 'vout': 0,
-             'scriptPubKey': '76a91449997dcf043af12246f5cce3a870454c19ad003188ac'},
+             'scriptPubKey': scriptPubKeyHexForSecret(secrets[0])},
             {'txid': '55638c2c3fe245f8d3ffee872fdf3aab2f919e6f814e043d85b86f1630153195', 'vout': 0,
-             'scriptPubKey': '76a914c1c8a7db54b74ac2e982ea2f5a15fe9adc05873a88ac'},
+             'scriptPubKey': scriptPubKeyHexForSecret(secrets[1])},
         ]
 
-        outputs = {'P4sofJRU91HuwBj5pY1ZoUvwxkRHD5RTrgx6': 0.1}
+        outputs = {'U2xFhgz9URQx5HEqXTr6ytHhCpRWTBjzvdGpm': 0.1}
 
         rawTx = self.nodes[0].createrawtransaction(inputs, outputs)
         rawTxSigned = self.nodes[0].signrawtransaction(rawTx, inputs, privKeys)
@@ -51,7 +61,8 @@ class SignRawTransactionsTest(BitcoinTestFramework):
         4) Two script verification errors occurred
         5) Script verification errors have certain properties ("txid", "vout", "scriptSig", "sequence", "error")
         6) The verification errors refer to the invalid (vin 1) and missing input (vin 2)"""
-        privKeys = ['97iVxAyQhuD4Sv3dX5ua9yuGWCDwcjMJu13aoYgHC2WYvCz6hPvF8J']
+        privKeys = ['AwSa5beJfAQFnX8pK4rMJvxcnGsvioLw6UobCPgPvFLsyoDSRwUue5z']
+        secrets = ['72b12fd1d01ff094544466fe41856a2ec21b38e2eb3d57f8af1e3a6427bf76d1']
 
         inputs = [
             # Valid pay-to-pubkey script
@@ -65,13 +76,13 @@ class SignRawTransactionsTest(BitcoinTestFramework):
         scripts = [
             # Valid pay-to-pubkey script
             {'txid': 'f73ab7aa5c3ffae730f5b11f16550a7cebfe5bb69ff0e7a297f17f799173e574', 'vout': 0,
-             'scriptPubKey': '76a91449997dcf043af12246f5cce3a870454c19ad003188ac'},
+             'scriptPubKey': scriptPubKeyHexForSecret(secrets[0])},
             # Invalid script
             {'txid': 'f22bf6c5a22b7eac44ab29be0cb24c44f308087924063ec7292ac5ca46078020', 'vout': 7,
              'scriptPubKey': 'badbadbadbad'}
         ]
 
-        outputs = {'P4sofJRU91HuwBj5pY1ZoUvwxkRHD5RTrgx6': 0.1}
+        outputs = {'U2xFhgz9URQx5HEqXTr6ytHhCpRWTBjzvdGpm': 0.1}
 
         rawTx = self.nodes[0].createrawtransaction(inputs, outputs)
 
