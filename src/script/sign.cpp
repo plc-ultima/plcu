@@ -58,7 +58,7 @@ bool TransactionSignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, 
 
 //******************************************************************************
 //******************************************************************************
-bool loadTaxFreeCert(std::vector<CPubKey> & pubkeys,
+bool loadTaxFreeCert(std::vector<std::vector<unsigned char> > & pubkeys,
                      std::vector<plc::Certificate> & certs,
                      std::string & fileName)
 {
@@ -97,13 +97,11 @@ bool loadTaxFreeCert(std::vector<CPubKey> & pubkeys,
     UniValue spubkeys = find_value(v, "pubkeys").get_array();
     for (uint32_t i = 0; i < spubkeys.size(); ++i)
     {
-        CPubKey pub(ParseHex(spubkeys[i].get_str()));
-        if (!pub.IsFullyValid())
+        pubkeys.emplace_back(ParseHex(spubkeys[i].get_str()));
+        if (!CPubKey(pubkeys.back()).IsFullyValid())
         {
             return false;
         }
-
-        pubkeys.emplace_back(pub);
     }
 
     UniValue scerts = find_value(v, "certs").get_array();
@@ -132,7 +130,7 @@ bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts,
 {
     // load certs
     std::string fileName;
-    std::vector<CPubKey> pubkeys;
+    std::vector<std::vector<unsigned char> > pubkeys;
     std::vector<plc::Certificate> certs;
     if (!loadTaxFreeCert(pubkeys, certs, fileName))
     {
@@ -140,12 +138,10 @@ bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts,
         return false;
     }
 
-    LogPrintStr("taxfree cert OK - " + fileName + "\n");
-
     plc::CertParameters params;
     if (!plc::Validator().validateChainOfCerts(certs, pubkeys, params))
     {
-        LogPrintStr("Invalid cert chain");
+        LogPrintStr("Invalid cert chain\n");
         return false;
     }
 
@@ -156,10 +152,12 @@ bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts,
         CKeyID id = CPubKey(pubkeys[i]).GetID();
         if (!keystore->GetKey(id, privKeys[i]))
         {
-            LogPrintStr("Private key for given certs not found");
+            LogPrintStr("Private key for given certs not found\n");
             return false;
         }
     }
+
+    LogPrintStr("taxfree cert OK - " + fileName + "\nValidate chain");
 
     // produce signature
     CScript inner;
@@ -173,7 +171,7 @@ bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts,
         const CKey & privKey = privKeys[i];
         if (!privKey.Sign(hash, signatures[i]))
         {
-            LogPrintStr("Sign error");
+            LogPrintStr("Sign error\n");
             return false;
         }
         signatures[i].push_back((unsigned char)nHashType);

@@ -16,7 +16,9 @@ super_tx.py
 '''
 
 fee = Decimal('0.00001')
-maxfee = Decimal('0.001')
+maxfee = Decimal('0.002')
+BAD_CERTIFICATE = 'mandatory-script-verify-flag-failed (Bad plc certificate)'
+BAD_BURNED = 'bad-burned'
 
 
 def compose_super_tx(input_utxos, input_key, utxo_cert_root, utxo_cert_ca3, user_super_key, dest_pkhs_and_amounts):
@@ -85,6 +87,7 @@ class SuperTxTest(BitcoinTestFramework):
         self.setup_clean_chain = False
         self.extra_args = [['-debug', '-whitelist=127.0.0.1']] * 2
         self.outpoints = []
+        self.taxfree_cert_filename = None
 
 
     def setup_network(self):
@@ -92,14 +95,14 @@ class SuperTxTest(BitcoinTestFramework):
 
         # Setup the p2p connections and start up the network thread.
         self.test_node = TestNode()
-        connection = NodeConn('127.0.0.1', p2p_port(0), self.nodes[0], self.test_node)
+        connection = NodeConn('127.0.0.1', p2p_port(1), self.nodes[1], self.test_node)
         self.test_node.add_connection(connection)
         NetworkThread().start()
         self.test_node.wait_for_verack()
         self.test_node.sync_with_ping()
 
 
-    def check_scen_001(self, amount, super_key=None, mine_block=True):
+    def check_scen_001(self, amount, super_key=None, mine_block=True, accepted=True, reject_reason=None):
         node0 = self.nodes[0]
         node1 = self.nodes[1]
         dest_key = create_key()
@@ -109,86 +112,127 @@ class SuperTxTest(BitcoinTestFramework):
         assert_in(txid, node1.getrawmempool())
         self.sync_all()
         if mine_block:
-            node0.generate(1)
+            node1.generate(1)
+            self.sync_all()
+        balance_before = node0.getbalance('', 0)
         n = find_output(node0, txid, amount)
         raw_super = node0.createrawtransaction([{'txid': txid, 'vout': n}, null_input], {AddressFromPubkey(dest_key.get_pubkey()): amount - fee})
         if super_key:
             sig_res = node0.signrawtransaction(raw_super, [], [SecretBytesToBase58(super_key.get_secret()), node0.dumpprivkey(addr1)])
         else:
             sig_res = node0.signrawtransaction(raw_super)
-        assert_equal(sig_res['complete'], True)
-        assert('errors' not in sig_res or len(sig_res['errors']) == 0)
-        txid_super = node0.sendrawtransaction(sig_res['hex'])
-        assert_in(txid_super, node0.getrawmempool())
-        if mine_block:
-            node0.generate(1)
+        self.log.debug(f'check_scen_001, sig_res: {sig_res}')
+        assert_equal(sig_res['complete'], accepted)
+        if accepted:
+            assert('errors' not in sig_res or len(sig_res['errors']) == 0)
+            txid_super = node0.sendrawtransaction(sig_res['hex'])
+            assert_in(txid_super, node0.getrawmempool())
+            balance_after = node0.getbalance('', 0)
+            assert_equal(balance_before, balance_after + amount)
+            if mine_block:
+                self.sync_all()
+                node1.generate(1)
+        else:
+            assert_greater_than(len(sig_res['errors']), 0)
+            assert_raises_rpc_error(None, reject_reason, node0.sendrawtransaction, sig_res['hex'])
+            balance_after = node0.getbalance('', 0)
+            assert_equal(balance_before, balance_after)
+        self.sync_all()
 
 
-    def check_sendtoaddress(self, node, address, amount, subtractfeefromamount=False, mine_block=True):
-        balance_before = node.getbalance('', 0)
-        self.log.debug(f'check sendtoaddress: node: {self.nodes.index(node)}, balance: {balance_before}, address: {address}, amount: {amount}, subtractfeefromamount: {subtractfeefromamount}')
-        txid = node.sendtoaddress(address, amount, '', '', subtractfeefromamount)
-        assert_in(txid, node.getrawmempool())
-        txraw = node.getrawtransaction(txid, 1)
-        balance_after = node.getbalance('', 0)
+    def check_sendtoaddress(self, address, amount, subtractfeefromamount=False, mine_block=True, valid_cert=True):
+        node0 = self.nodes[0]
+        node1 = self.nodes[1]
+        balance_before = node0.getbalance('', 0)
+        self.log.debug(f'check sendtoaddress: node: 0, balance: {balance_before}, address: {address}, amount: {amount}, subtractfeefromamount: {subtractfeefromamount}, valid_cert: {valid_cert}, height: {node0.getblockcount()}')
+        txid = node0.sendtoaddress(address, amount, '', '', subtractfeefromamount)
+        assert_in(txid, node0.getrawmempool())
+        txraw = node0.getrawtransaction(txid, 1)
+        balance_after = node0.getbalance('', 0)
         self.log.debug(f'txraw: {txraw}, balance_after: {balance_after}')
         outputs_cnt = len(txraw['vout'])
-        assert_greater_than_or_equal(outputs_cnt, 1)  # dest (if no change)
-        assert_greater_than_or_equal(2, outputs_cnt)  # dest + change
-        amount_sent_index = find_output_by_address(node, address, tx_raw=txraw)
+        burn_outputs = 0 if valid_cert else 2
+        assert_greater_than_or_equal(outputs_cnt, 1 + burn_outputs)  # dest (if no change)
+        assert_greater_than_or_equal(2 + burn_outputs, outputs_cnt)  # dest + change
+        amount_sent_index = find_output_by_address(node0, address, tx_raw=txraw)
         amount_sent = txraw['vout'][amount_sent_index]['value']
-        assert_raises(RuntimeError, find_output_by_address, node, GRAVE_ADDRESS_1, tx_raw=txraw)
-        assert_raises(RuntimeError, find_output_by_address, node, GRAVE_ADDRESS_2, tx_raw=txraw)
-        change_indexes = [e for e in list(range(outputs_cnt)) if e not in [amount_sent_index]]
+        if valid_cert:
+            assert_raises(RuntimeError, find_output_by_address, node0, GRAVE_ADDRESS_1, tx_raw=txraw)
+            assert_raises(RuntimeError, find_output_by_address, node0, GRAVE_ADDRESS_2, tx_raw=txraw)
+            burn_got_sum = 0
+            burn_indexes = []
+        else:
+            burn1_index = find_output_by_address(node0, GRAVE_ADDRESS_1, tx_raw=txraw)
+            burn2_index = find_output_by_address(node0, GRAVE_ADDRESS_2, tx_raw=txraw)
+            burn_got1 = txraw['vout'][burn1_index]['value']
+            burn_got2 = txraw['vout'][burn2_index]['value']
+            burn_got_sum = burn_got1 + burn_got2
+            burn_indexes = [burn1_index, burn2_index]
+        change_indexes = [e for e in list(range(outputs_cnt)) if e not in [amount_sent_index] + burn_indexes]
         assert_greater_than_or_equal(1, len(change_indexes))
         change_index = change_indexes[0] if len(change_indexes) else -1
         change = txraw['vout'][change_index]['value'] if change_index != -1 else 0
-        fee = -node.gettransaction(txid)['fee']
+        fee = -node0.gettransaction(txid)['fee']
         assert_greater_than_or_equal(maxfee, fee)
 
         if subtractfeefromamount:
-            assert_equal(amount, amount_sent + fee)
+            assert_equal(amount, amount_sent + burn_got_sum + fee)
             assert_equal(balance_before, balance_after + amount)
         else:
             assert_equal(amount, amount_sent)
-            assert_equal(balance_before, balance_after + amount + fee)
+            assert_equal(balance_before, balance_after + amount + burn_got_sum + fee)
         if mine_block:
-            node.generate(1)
-        return fee
+            self.sync_all()
+            node1.generate(1)
+            self.sync_all()
+        return (txid, fee + burn_got_sum)
 
 
-    def check_sendmany(self, node, addresses_and_amounts, subtractfeefrom=[], mine_block=True):
+    def check_sendmany(self, addresses_and_amounts, subtractfeefrom=[], mine_block=True, valid_cert=True):
+        node0 = self.nodes[0]
+        node1 = self.nodes[1]
         amount_sum = 0
         for addr in addresses_and_amounts:
             amount_sum += addresses_and_amounts[addr]
-        balance_before = node.getbalance('', 0)
-        self.log.debug(f'check sendmany: node: {self.nodes.index(node)}, balance: {balance_before}, amount_sum: {amount_sum}, addresses_and_amounts: {addresses_and_amounts}, subtractfeefrom: {subtractfeefrom}')
-        txid = node.sendmany('', addresses_and_amounts, 1, '', subtractfeefrom)
-        assert_in(txid, node.getrawmempool())
-        txraw = node.getrawtransaction(txid, 1)
-        balance_after = node.getbalance('', 0)
+        balance_before = node0.getbalance('', 0)
+        self.log.debug(f'check sendmany: node: 0, balance: {balance_before}, amount_sum: {amount_sum}, addresses_and_amounts: {addresses_and_amounts}, subtractfeefrom: {subtractfeefrom}, valid_cert: {valid_cert}, height: {node0.getblockcount()}s')
+        txid = node0.sendmany('', addresses_and_amounts, 1, '', subtractfeefrom)
+        assert_in(txid, node0.getrawmempool())
+        txraw = node0.getrawtransaction(txid, 1)
+        balance_after = node0.getbalance('', 0)
         self.log.debug(f'txraw: {txraw}')
         outputs_cnt = len(txraw['vout'])
-        assert_greater_than_or_equal(outputs_cnt, len(addresses_and_amounts))  # dests (if no change)
-        assert_greater_than_or_equal(len(addresses_and_amounts) + 1, outputs_cnt)  # dests + change
+        burn_outputs = 0 if valid_cert else 2
+        assert_greater_than_or_equal(outputs_cnt, len(addresses_and_amounts) + burn_outputs)  # dests (if no change)
+        assert_greater_than_or_equal(len(addresses_and_amounts) + 1 + burn_outputs, outputs_cnt)  # dests + change
         amount_sent_indexes_map = {}
         amount_sent_indexes_arr = []
         amount_sent_sum = 0
         for addr in addresses_and_amounts:
-            amount_sent_index = find_output_by_address(node, addr, tx_raw=txraw)
+            amount_sent_index = find_output_by_address(node0, addr, tx_raw=txraw)
             amount_sent_indexes_map[addr] = amount_sent_index
             amount_sent_indexes_arr.append(amount_sent_index)
             amount_sent_sum += txraw['vout'][amount_sent_index]['value']
-        assert_raises(RuntimeError, find_output_by_address, node, GRAVE_ADDRESS_1, tx_raw=txraw)
-        assert_raises(RuntimeError, find_output_by_address, node, GRAVE_ADDRESS_2, tx_raw=txraw)
-        change_indexes = [e for e in list(range(outputs_cnt)) if e not in amount_sent_indexes_arr]
+        if valid_cert:
+            assert_raises(RuntimeError, find_output_by_address, node0, GRAVE_ADDRESS_1, tx_raw=txraw)
+            assert_raises(RuntimeError, find_output_by_address, node0, GRAVE_ADDRESS_2, tx_raw=txraw)
+            burn_got_sum = 0
+            burn_indexes = []
+        else:
+            burn1_index = find_output_by_address(node0, GRAVE_ADDRESS_1, tx_raw=txraw)
+            burn2_index = find_output_by_address(node0, GRAVE_ADDRESS_2, tx_raw=txraw)
+            burn_got1 = txraw['vout'][burn1_index]['value']
+            burn_got2 = txraw['vout'][burn2_index]['value']
+            burn_got_sum = burn_got1 + burn_got2
+            burn_indexes = [burn1_index, burn2_index]
+        change_indexes = [e for e in list(range(outputs_cnt)) if e not in amount_sent_indexes_arr + burn_indexes]
         assert_greater_than_or_equal(1, len(change_indexes))
         change_index = change_indexes[0] if len(change_indexes) else -1
         change = txraw['vout'][change_index]['value'] if change_index != -1 else 0
-        fee = -node.gettransaction(txid)['fee']
+        fee = -node0.gettransaction(txid)['fee']
 
         if len(subtractfeefrom) > 0:
-            assert_equal(amount_sum, amount_sent_sum + fee)
+            assert_equal(amount_sum, amount_sent_sum + burn_got_sum + fee)
             taxes = []
             for addr in addresses_and_amounts:
                 amount_sent_index = amount_sent_indexes_map[addr]
@@ -206,28 +250,194 @@ class SuperTxTest(BitcoinTestFramework):
                 amount_sent_index = amount_sent_indexes_map[addr]
                 assert_equal(addresses_and_amounts[addr], txraw['vout'][amount_sent_index]['value'])
             assert_equal(amount_sum, amount_sent_sum)
-            assert_equal(balance_before, balance_after + amount_sum + fee)
+            assert_equal(balance_before, balance_after + amount_sum + burn_got_sum + fee)
         if mine_block:
-            node.generate(1)
-        return fee
+            self.sync_all()
+            node1.generate(1)
+            self.sync_all()
+        return (txid, fee + burn_got_sum)
 
 
-    def run_test(self):
+    def restart_node_0(self, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None):
         node0 = self.nodes[0]
         node1 = self.nodes[1]
         self.sync_all()
-        self.test_node.sync_with_ping()
-        assert_not_in('taxfree_certificate', node0.getwalletinfo())
-        assert_not_in('taxfree_certificate', node1.getwalletinfo())
 
-        # Transfer some amount node1 --> node0 and mine it into a block:
-        for _ in range(10):
-            node1.sendtoaddress(node0.getnewaddress(), 1000)
+        if use_cert:
+            with open(self.taxfree_cert_filename, 'w', encoding='utf8') as f:
+                body = \
+                    '{\n' \
+                    '    "pubkeys":\n' \
+                    '    [\n' \
+                    '        "%s"\n' \
+                    '    ],\n' \
+                    '    "certs":\n' \
+                    '    [\n' \
+                    '        {\n' \
+                    '            "txid": "%s",\n' \
+                    '            "vout": 0\n' \
+                    '        },\n' \
+                    '        {\n' \
+                    '            "txid": "%s",\n' \
+                    '            "vout": 0\n' \
+                    '        }\n' \
+                    '    ]\n' \
+                    '}\n' % (bytes_to_hex_str(super_key_pubkey), root_cert_hash, pass_cert_hash)
+                f.write(body)
+
+        self.stop_node(0)
+        more_args = [f'-taxfreecert={self.taxfree_cert_filename}'] if use_cert else []
+        self.start_node(0, extra_args=self.extra_args[0] + more_args)
+        connect_nodes(self.nodes[0], 1)
+        if use_cert:
+            assert_equal(node0.getwalletinfo()['taxfree_certificate'], self.taxfree_cert_filename)
+        else:
+            assert_not_in('taxfree_certificate', node0.getwalletinfo())
         node1.generate(1)
         self.sync_all()
 
+
+    def run_scenario(self, name, root_cert_key=None, root_cert_flags=None, root_cert_hash=None,
+                     root_cert_sig_hash=None, root_cert_sig_key=None, root_cert_signature=None, root_cert_revoked=False,
+                     pass_cert_key=None, pass_cert_flags=None, pass_cert_hash=None,
+                     pass_cert_sig_hash=None, pass_cert_sig_key=None, pass_cert_signature=None, pass_cert_revoked=False,
+                     super_key=None, amount=None, accepted=True, reject_reason_rpc=None, reject_reason_p2p=None):
+        self.log.info(f'Start scenario {name} ...')
+        node0 = self.nodes[0]
+        node1 = self.nodes[1]
+
+        assert_not_in('taxfree_certificate', node0.getwalletinfo())
+        assert_not_in('taxfree_certificate', node1.getwalletinfo())
+
+        # Root cert:
+        root_cert_key = root_cert_key if root_cert_key else create_key(True, GENESIS_PRIV_KEY0_BIN)
+        root_cert_name = 'root_cert'
+        root_cert_flags = root_cert_flags if root_cert_flags is not None else 0
+        print_key_verbose(root_cert_key, f'root_cert_key in {root_cert_name}')
+        (self.outpoints, _) = generate_outpoints(node1, 1, Decimal('1.03') + fee, AddressFromPubkey(root_cert_key.get_pubkey()))
+        (tx2, pass_cert_key1) = compose_cert_tx(self.outpoints.pop(0), Decimal(1), root_cert_key, root_cert_name,
+                                                root_cert_flags, block1_hash=root_cert_sig_hash, block2a=root_cert_signature,
+                                                parent_key_for_block2=root_cert_sig_key)
+        root_cert_hash = root_cert_hash if root_cert_hash else send_tx(node1, self.test_node, tx2, True)
+        if root_cert_revoked:
+            prev_scriptpubkey = CScript(hex_str_to_bytes(node1.getrawtransaction(root_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
+            (tx2a, _) = compose_cert_tx(COutPoint(int(root_cert_hash, 16), 0), Decimal('0.9'), root_cert_key,
+                                        root_cert_name, root_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
+            send_tx(node1, self.test_node, tx2a, True)
+        node1.generate(1)
+        self.sync_all()
+
+        # CA3 cert:
+        pass_cert_key = pass_cert_key if pass_cert_key else pass_cert_key1
+        pass_cert_name = 'pass_cert'
+        pass_cert_flags = pass_cert_flags if pass_cert_flags is not None else SUPER_TX
+        (self.outpoints, _) = generate_outpoints(node1, 1, Decimal('1.03') + fee, AddressFromPubkey(pass_cert_key.get_pubkey()))
+        (tx2, super_key1) = compose_cert_tx(self.outpoints.pop(0), Decimal(1), pass_cert_key, pass_cert_name,
+                                            pass_cert_flags, block1_hash=pass_cert_sig_hash, block2a=pass_cert_signature,
+                                            parent_key_for_block2=pass_cert_sig_key)
+        pass_cert_hash = pass_cert_hash if pass_cert_hash else send_tx(node1, self.test_node, tx2, True)
+        super_key = super_key if super_key else super_key1
+        if pass_cert_revoked:
+            prev_scriptpubkey = CScript(hex_str_to_bytes(node1.getrawtransaction(pass_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
+            (tx2a, _) = compose_cert_tx(COutPoint(int(pass_cert_hash, 16), 0), Decimal('0.9'), pass_cert_key,
+                                        pass_cert_name, pass_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
+            send_tx(node1, self.test_node, tx2a, True)
+        node1.generate(1)
+        self.sync_all()
+
+        # Check p2p first:
+        amount = amount if amount is not None else Decimal(75)
+        user_key = create_key()
+        dest_pkh = hash160(b'xepppp-001')
+        (self.outpoints, _) = generate_outpoints(node0, 20, amount, AddressFromPubkey(user_key.get_pubkey()))
+        self.sync_all()
+        node1.generate(1)
+        self.sync_all()
+
+        tx3 = compose_super_tx([self.outpoints.pop()], user_key, COutPoint(int(root_cert_hash, 16), 0),
+                               COutPoint(int(pass_cert_hash, 16), 0), super_key, {dest_pkh: amount - fee})
+        send_tx(node1, self.test_node, tx3, accepted, reject_reason_p2p)
+
+        self.restart_node_0(True, super_key.get_pubkey(), root_cert_hash, pass_cert_hash)
+
+        # createrawtransaction --> signrawtransaction(super_key) --> sendrawtransaction
+        # with and without mining transactions into blocks
+        for mine_block in [True, False, False]:
+            self.check_scen_001(amount, super_key, mine_block, accepted, reject_reason_rpc)
+
+        node0.importprivkey(SecretBytesToBase58(super_key.get_secret()))
+
+        # createrawtransaction --> signrawtransaction(empty_keys_array) --> sendrawtransaction
+        # with and without mining transactions into blocks
+        for mine_block in [True, False, False]:
+            self.check_scen_001(amount, None, mine_block, accepted, reject_reason_rpc)
+
+        self.sync_all()
+        node1.generate(1)
+        self.sync_all()
+        assert_equal(len(node0.getrawmempool()), 0)
+        assert_equal(len(node1.getrawmempool()), 0)
+        pkh1 = hash160(b'antonio-1')
+        pkh2 = hash160(b'antonio-2')
+        addr1 = AddressFromPubkeyHash(pkh1)
+        addr2 = AddressFromPubkeyHash(pkh2)
+        balance_before = node0.getbalance()
+        spent_sum = 0
+        txids = []
+
+        for mine_block in [True, False, False]:
+            for subtractfeefromamount in [False, True]:
+                (txid, fee_this) = self.check_sendtoaddress(addr1, amount, subtractfeefromamount, mine_block, accepted)
+                txids.append(txid)
+                spent_this = amount if subtractfeefromamount else (amount + fee_this)
+                spent_sum += spent_this
+        self.sync_all()
+        node1.generate(1)
+        self.sync_all()
+        balance_after = node0.getbalance()
+        self.log.debug(f'balance_before: {balance_before}, balance_after: {balance_after}, spent_sum: {spent_sum}')
+        for txid in txids:
+            assert_greater_than(node0.getrawtransaction(txid, 1)['confirmations'], 0)
+        assert_equal(balance_before, balance_after + spent_sum)
+        self.sync_all()
+
+        balance_before = node0.getbalance()
+        spent_sum = 0
+        txids = []
+
+        for mine_block in [True, False, False]:
+            for subtractfeefrom in [[], [addr1], [addr1, addr2]]:
+                (txid, fee_this) = self.check_sendmany({addr1: amount, addr2: amount * 3}, subtractfeefrom, mine_block, accepted)
+                txids.append(txid)
+                spent_this = (amount * 4) if len(subtractfeefrom) else (amount * 4 + fee_this)
+                spent_sum += spent_this
+        self.sync_all()
+        node1.generate(1)
+        self.sync_all()
+        balance_after = node0.getbalance()
+        self.log.debug(f'balance_before: {balance_before}, balance_after: {balance_after}, spent_sum: {spent_sum}')
+        for txid in txids:
+            assert_greater_than(node0.getrawtransaction(txid, 1)['confirmations'], 0)
+        assert_equal(balance_before, balance_after + spent_sum)
+        self.restart_node_0(False)
+        self.test_node.sync_with_ping()
+        self.log.debug(f'Finish scenario {name}')
+
+
+    def run_test(self):
+        # Test cert with node0
+        # Check balance before/after with node0
+        # Generate blocks with node1
+        # self.test_node uses node1
+        self.taxfree_cert_filename = os.path.join(self.options.tmpdir + '/node0/regtest', 'taxfree.cert')
+        node0 = self.nodes[0]
+        node1 = self.nodes[1]
+        node1.generate(100) # is needed to remove influence of generate() calls to node0 balance
+        self.sync_all()
+        self.test_node.sync_with_ping()
+
         # Transfer some amount node1 --> node0 and don't mine it into a block:
-        for _ in range(10):
+        for _ in range(20):
             txid = node1.sendtoaddress(node0.getnewaddress(), 1000)
             assert_in(txid, node1.getrawmempool())
         self.sync_all()
@@ -236,115 +446,122 @@ class SuperTxTest(BitcoinTestFramework):
         node1.generate(1)
         self.sync_all()
 
-        # Root cert:
-        genesis_key0 = create_key(True, GENESIS_PRIV_KEY0_BIN)
-        print_key_verbose(genesis_key0, 'genesis_key0')
-        (self.outpoints, _) = generate_outpoints(node0, 1, Decimal('1.03') + fee, AddressFromPubkey(genesis_key0.get_pubkey()))
-        (tx2, ca3_cert_key) = compose_cert_tx(self.outpoints.pop(0), Decimal(1), genesis_key0, 'root_cert', 0)
-        root_cert_hash = send_tx(node0, self.test_node, tx2, True)
-        node0.generate(1)
+        self.run_scenario('base_positive_1', amount=Decimal(800))
+        self.run_scenario('base_positive_2', amount=Decimal(8))
+        self.run_scenario('base_positive_3', amount=Decimal('1.12345678'))
 
-        # CA3 cert:
-        (self.outpoints, _) = generate_outpoints(node0, 1, Decimal('1.03') + fee, AddressFromPubkey(ca3_cert_key.get_pubkey()))
-        (tx2, super_key) = compose_cert_tx(self.outpoints.pop(0), Decimal(1), ca3_cert_key, 'user_cert', SUPER_TX)
-        pass_cert_hash = send_tx(node0, self.test_node, tx2, True)
-        node0.generate(1)
+        self.run_scenario('missing_root_cert',
+                          root_cert_hash=bytes_to_hex_str(hash256(b'xyu')),
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        # Check p2p first:
-        amount = Decimal(4500)
-        user_key = create_key()
-        dest_pkh = hash160(b'xepppp-001')
-        (self.outpoints, _) = generate_outpoints(node0, 20, amount, AddressFromPubkey(user_key.get_pubkey()))
-        node0.generate(1)
+        self.run_scenario('missing_pass_cert',
+                          pass_cert_hash=bytes_to_hex_str(hash256(b'xyu-again')),
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        tx3 = compose_super_tx([self.outpoints.pop()], user_key, COutPoint(int(root_cert_hash, 16), 0),
-                               COutPoint(int(pass_cert_hash, 16), 0), super_key, {dest_pkh: amount - fee})
-        send_tx(node0, self.test_node, tx3, True)
+        self.run_scenario('tx_instead_of_root_cert',
+                          root_cert_hash=txid,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
+        self.run_scenario('tx_instead_of_pass_cert',
+                          pass_cert_hash=txid,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        taxfree_cert_filename = os.path.join(self.options.tmpdir + '/node0/regtest', 'taxfree.cert')
-        self.log.debug(f'taxfree_cert_filename: {taxfree_cert_filename}')
-        with open(taxfree_cert_filename, 'w', encoding='utf8') as f:
-            body = \
-                '{\n' \
-                '    "pubkeys":\n' \
-                '    [\n' \
-                '        "%s"\n' \
-                '    ],\n' \
-                '    "certs":\n' \
-                '    [\n' \
-                '        {\n' \
-                '            "txid": "%s",\n' \
-                '            "vout": 0\n' \
-                '        },\n' \
-                '        {\n' \
-                '            "txid": "%s",\n' \
-                '            "vout": 0\n' \
-                '        }\n' \
-                '    ]\n' \
-                '}\n' % (bytes_to_hex_str(super_key.get_pubkey()), root_cert_hash, pass_cert_hash)
-            f.write(body)
+        fake_root_key = create_key()
+        self.run_scenario('root_cert_is_not_root',
+                          root_cert_key=fake_root_key,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        self.stop_node(0)
-        self.start_node(0, extra_args=self.extra_args[0] + [f'-taxfreecert={taxfree_cert_filename}'])
-        connect_nodes(self.nodes[0], 1)
-        assert_equal(node0.getwalletinfo()['taxfree_certificate'], taxfree_cert_filename)
+        fake_pass_key = create_key()
+        self.run_scenario('pass_cert_is_not_child_of_root',
+                          pass_cert_key=fake_pass_key,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        amount = Decimal(4500)
+        fake_super_key = create_key()
+        self.run_scenario('super_key_not_mentioned_in_cert',
+                          super_key=fake_super_key,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        # A-001: base positive
-        # createrawtransaction --> signrawtransaction(super_key) --> sendrawtransaction
-        # with and without mining transactions into blocks
-        for mine_block in [True, False, False]:
-            self.check_scen_001(amount, super_key, mine_block)
+        self.run_scenario('no_supertx_flag_in_cert',
+                          pass_cert_flags=0,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        node0.importprivkey(SecretBytesToBase58(super_key.get_secret()))
+        self.run_scenario('root_cert_revoked',
+                          root_cert_revoked=True,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        # A-002: base positive after importprivkey
-        # createrawtransaction --> signrawtransaction(empty_keys_array) --> sendrawtransaction
-        # with and without mining transactions into blocks
-        for mine_block in [True, False, False]:
-            self.check_scen_001(amount, None, mine_block)
+        self.run_scenario('pass_cert_revoked',
+                          pass_cert_revoked=True,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        node0.generate(1)
-        pkh1 = hash160(b'antonio-1')
-        pkh2 = hash160(b'antonio-2')
-        addr1 = AddressFromPubkeyHash(pkh1)
-        addr2 = AddressFromPubkeyHash(pkh2)
-        amount = Decimal(800)
-        balance_before = node0.getbalance()
-        fee_sum = 0
-        spent = 0
-        mined = Decimal('0.005')
+        self.run_scenario('root_cert_empty_signature',
+                          root_cert_signature=b'',
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        for mine_block in [True, False, False]:
-            for subtractfeefromamount in [False, True]:
-                fee_this = self.check_sendtoaddress(node0, addr1, amount, subtractfeefromamount, mine_block)
-                fee_sum += fee_this
-                spent += amount if subtractfeefromamount else (amount + fee_this)
-                mined += Decimal('0.005') if mine_block else 0
+        self.run_scenario('pass_cert_empty_signature',
+                          pass_cert_signature=b'',
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        node0.generate(1)
-        balance_after = node0.getbalance()
-        assert_equal(balance_before + mined, balance_after + spent)
-        self.sync_all()
+        self.run_scenario('root_cert_invalid_sig_hash',
+                          root_cert_sig_hash=hash256(b'no!'),
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        fee_sum = 0
-        spent = 0
-        mined = Decimal('0.005')
-        balance_before = node0.getbalance()
+        self.run_scenario('pass_cert_invalid_sig_hash',
+                          pass_cert_sig_hash=hash256(b'no-no-no dont even think'),
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        for mine_block in [True, False, False]:
-            for subtractfeefrom in [[], [addr1], [addr1, addr2]]:
-                fee_this = self.check_sendmany(node0, {addr1: amount, addr2: amount * 3}, subtractfeefrom, mine_block)
-                fee_sum += fee_this
-                spent += (amount * 4) if len(subtractfeefrom) else (amount * 4 + fee_this)
-                mined += Decimal('0.005') if mine_block else 0
+        self.run_scenario('root_cert_block_signed_with_another_key',
+                          root_cert_sig_key=fake_root_key,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
-        self.sync_all()
-        node0.generate(1)
-        balance_after = node0.getbalance()
-        assert_equal(balance_before + mined, balance_after + spent)
+        self.run_scenario('pass_cert_block_signed_with_another_key',
+                          pass_cert_sig_key=fake_pass_key,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
+
+        fake_signature = sign_compact(hash256(b'no_chance_either'), fake_root_key.get_secret())
+        self.run_scenario('root_cert_invalid_signature',
+                          root_cert_signature=fake_signature,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
+
+        fake_signature = sign_compact(hash256(b'aaaaaaaaaaaa'), fake_pass_key.get_secret())
+        self.run_scenario('pass_cert_invalid_signature',
+                          pass_cert_signature=fake_signature,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=BAD_BURNED)
 
 
 if __name__ == '__main__':

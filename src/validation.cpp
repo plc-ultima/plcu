@@ -3310,11 +3310,12 @@ std::pair<CAmount, uint32_t> getTotalAmount()
 
     auto t3 = std::chrono::high_resolution_clock::now();
 
-    LogPrintf("Total amount %d (%d utxo items) calculated in %d-%d, %d milliseconds",
-              fullamount, count,
-              std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count(),
-              std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count(),
-              std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t1).count());
+    LogPrint(BCLog::VALIDATION,
+             "Total amount %d (%d utxo items) calculated in %d-%d, %d milliseconds\n",
+             fullamount, count,
+             std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t1).count());
 
     return std::make_pair(fullamount, count);
 }

@@ -185,7 +185,7 @@ enum opcodetype
     // PLCU specific
     OP_CHECKREWARD     = 0xc0,
     OP_CHECKSUPER      = 0xc1,
-    OP_CHECKDESTINATIONVERIFY = 0xd0,
+    OP_CHECKDESTINATIONVERIFY = 0xc2,
 
     // template matching params
     OP_SMALLINTEGER = 0xfa,

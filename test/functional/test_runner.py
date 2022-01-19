@@ -70,6 +70,7 @@ BASE_SCRIPTS= [
     'p2p-segwit.py',
     'wallet-dump.py',
     'listtransactions.py',
+    'super_tx.py',
     # vv Tests less than 60s vv
     'sendheaders.py',
     'zapwallettxes.py',
@@ -130,7 +131,6 @@ BASE_SCRIPTS= [
     'grave.py',
     'coinbase_subsidy.py',
     'total_emission.py',
-    'super_tx.py',
     'minting.py',
     'minting.py --mintalltestcases',
 ]

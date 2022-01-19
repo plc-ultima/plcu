@@ -118,7 +118,7 @@ def send_tx(node, test_node, tx, accepted, reject_reason=None):
 
 
 def generate_outpoints(node, count, amount, address):
-    logger.debug(f'generate_outpoints: count: {count}, amount: {amount}, address: {address}')
+    logger.debug(f'generate_outpoints: count: {count}, amount: {amount}, address: {address}, balance: {node.getbalance()}')
     outpoints = []
     fee_sum = 0
     for i in range(count):
@@ -128,7 +128,8 @@ def generate_outpoints(node, count, amount, address):
     return (outpoints, fee_sum)
 
 
-def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVICE_KEY | SILVER_HOOF, child_key=None):
+def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVICE_KEY | SILVER_HOOF,
+                    child_key=None, prev_scriptpubkey=None, block1a=None, block2a=None, block1_hash=None, parent_key_for_block2=None):
     parent_pubkey_bin = parent_key.get_pubkey()
     pubkeyhash = hash160(parent_pubkey_bin)
     child_key = child_key if child_key else create_key()
@@ -136,10 +137,14 @@ def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVIC
     block1 = bytearray(struct.pack(b"<I", flags))
     user_pubkeyhash = hash160(child_key.get_pubkey())
     block1.extend(user_pubkeyhash)
-    dev_key = create_key()
-    block1.extend(hash160(dev_key.get_pubkey()))
-    block1_hash = hash256(block1)
-    block2 = sign_compact(block1_hash, parent_key.get_secret())
+    if flags & HAS_DEVICE_KEY:
+        dev_key = create_key()
+        block1.extend(hash160(dev_key.get_pubkey()))
+    if block1a is not None:
+        block1 = block1a
+    block1_hash = block1_hash if block1_hash else hash256(block1)
+    parent_key_for_block2 = parent_key_for_block2 if parent_key_for_block2 else parent_key
+    block2 = block2a if block2a is not None else sign_compact(block1_hash, parent_key_for_block2.get_secret())
 
     scriptOutPKH = CScript([block1, block2, OP_2DROP, OP_DUP, OP_HASH160, pubkeyhash, OP_EQUALVERIFY, OP_CHECKSIG])
     (burn1, burn2) = GetBurnedValue(amount)
@@ -149,7 +154,7 @@ def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVIC
     tx2.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
     tx2.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
 
-    scriptPubKey = GetP2PKHScript(pubkeyhash)
+    scriptPubKey = prev_scriptpubkey if prev_scriptpubkey else GetP2PKHScript(pubkeyhash)
     (sig_hash, err) = SignatureHash(scriptPubKey, tx2, 0, SIGHASH_ALL)
     assert (err is None)
     signature = parent_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))

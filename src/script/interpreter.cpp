@@ -2007,10 +2007,12 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
             return set_error(serror, SCRIPT_ERR_BAD_REWARD_ROBBERY);
         }
 
-        LogPrintf("%s: silver hooves knocking on a money box, %d yo-ho-ho and the bottle of rum!\n",
-                  __func__, hoofAmount);
-        LogPrintf("%s: %s\n",
-                  __func__, txTo->GetHash().ToString());
+        LogPrint(BCLog::VALIDATION,
+                 "%s: silver hooves knocking on a money box, %d yo-ho-ho and the bottle of rum!\n",
+                 __func__, hoofAmount);
+        LogPrint(BCLog::VALIDATION,
+                 "%s: %s\n",
+                 __func__, txTo->GetHash().ToString());
         return true;
     }
 

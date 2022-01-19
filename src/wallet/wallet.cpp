@@ -3158,7 +3158,14 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
         {
             for (const std::pair<CScript, double> & pairs : graves)
             {
-                txNew.vout[burnedPos++].nValue = transferAmount.first * pairs.second;
+                txNew.vout[burnedPos].nValue = transferAmount.first * pairs.second;
+                if (IsDust(txNew.vout[burnedPos], ::dustRelayFee))
+                {
+                    strFailReason = _("Burn amount too small");
+                    return false;
+                }
+
+                ++burnedPos;
             }
         }
 

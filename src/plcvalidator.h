@@ -30,9 +30,6 @@ public:
 public:
     // reqire cs_main!!!
     bool validateChainOfCerts(const std::vector<Certificate> & certs,
-                              const std::vector<CPubKey> & pubkeys,
-                              CertParameters & params) const;
-    bool validateChainOfCerts(const std::vector<Certificate> & certs,
                               const std::vector<std::vector<unsigned char> > & pubkeys,
                               CertParameters & params) const;
 

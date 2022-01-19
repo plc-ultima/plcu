@@ -73,7 +73,7 @@ struct SignatureData {
     explicit SignatureData(const CScript& script) : scriptSig(script) {}
 };
 
-bool loadTaxFreeCert(std::vector<CPubKey> & pubkeys,
+bool loadTaxFreeCert(std::vector<std::vector<unsigned char> > & pubkeys,
                      std::vector<plc::Certificate> & certs,
                      std::string & fileName);
 

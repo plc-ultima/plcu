@@ -394,7 +394,7 @@ public:
         consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this), 0.02),
                                      std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
 
-        consensus.maxCaBlock                 = 256;
+        consensus.maxCaBlock                 = 512;
         consensus.defaultFeeReductionBlock   = 2000;
         consensus.maxTotalAmount             = 1100000 * COIN;
 

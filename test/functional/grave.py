@@ -15,6 +15,10 @@ from test_framework.blocktools import create_coinbase, create_block
 grave.py
 '''
 
+ADDRESS_PROHIBITED = 'Address prohibited'
+BURN_AMOUNT_TOO_SMALL = 'Burn amount too small'
+TOO_SMALL_TO_PAY_FEE = 'The transaction amount is too small to pay the fee'
+
 def create_my_key():
     my_key = create_key(True)
     my_pubkey = my_key.get_pubkey()
@@ -212,17 +216,11 @@ class GraveTest(BitcoinTestFramework):
 
     def run_test(self):
         node0 = self.nodes[0]
-
-        (burn1, burn2) = GetBurnedValue(Decimal(6))
-        assert_raises_rpc_error(None, 'Address prohibited', node0.sendmany, '', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_1: burn1})
-        assert_raises_rpc_error(None, 'Address prohibited', node0.sendmany, '', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_2: burn2})
-        assert_raises_rpc_error(None, 'Address prohibited', node0.sendmany, '', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
-        assert_raises_rpc_error(None, 'Address prohibited', node0.sendtoaddress, GRAVE_ADDRESS_1, burn1)
-        assert_raises_rpc_error(None, 'Address prohibited', node0.sendtoaddress, GRAVE_ADDRESS_2, burn2)
-
         self.test_node.sync_with_ping()
 
         amount = Decimal(10)
+        small_amount_bad = Decimal('0.00015000')
+        small_amount_good = Decimal('0.00020000')
         fee = Decimal('0.00001')
         pkh1 = hash160(b'xep1')
         pkh2 = hash160(b'xep2')
@@ -232,14 +230,31 @@ class GraveTest(BitcoinTestFramework):
         addr3 = AddressFromPubkeyHash(pkh3)
         self.log.info(f'addr1: {addr1}, addr2: {addr2}, addr3: {addr3}, grave1: {GRAVE_ADDRESS_1}, grave2: {GRAVE_ADDRESS_2}')
 
+        (burn1, burn2) = GetBurnedValue(Decimal(6))
+        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendmany, '',
+                                {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3,
+                                 GRAVE_ADDRESS_1: burn1})
+        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendmany, '',
+                                {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3,
+                                 GRAVE_ADDRESS_2: burn2})
+        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendmany, '',
+                                {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3,
+                                 GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
+        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendmany, '', {addr1: small_amount_bad})
+        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendmany, '',
+                                {addr1: small_amount_bad / 2, addr2: small_amount_bad / 2})
+        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendtoaddress, GRAVE_ADDRESS_1, burn1)
+        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendtoaddress, GRAVE_ADDRESS_2, burn2)
+        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendtoaddress, addr1, small_amount_bad)
+
         # Node has only utxos with amount=5000, no chance to pay fee and burn for full 5000 (changeToNewAddress=True and subtractfeefromamount=True) from small dest amount:
-        assert_raises_rpc_error(None, 'The transaction amount is too small to pay the fee', self.check_sendtoaddress,
-                                node0, addr1, amount, subtractfeefromamount=True, changeToNewAddress=True)
+        assert_raises_rpc_error(None, TOO_SMALL_TO_PAY_FEE, self.check_sendtoaddress, node0, addr1, amount,
+                                subtractfeefromamount=True, changeToNewAddress=True)
 
         # Node has only utxos with amount=5000, no chance to pay fee and burn for full 5000 (changeToNewAddress=True and subtractfeefromamount=[any]) from small dest amount(s):
         for subtractfeefrom in [[addr1], [addr1, addr3], [addr1, addr2, addr3]]:
-            assert_raises_rpc_error(None, 'The transaction amount is too small to pay the fee', self.check_sendmany,
-                                    node0, {addr1: amount, addr2: amount * 2, addr3: amount * 3}, True, subtractfeefrom)
+            assert_raises_rpc_error(None, TOO_SMALL_TO_PAY_FEE, self.check_sendmany, node0,
+                                    {addr1: amount, addr2: amount * 2, addr3: amount * 3}, True, subtractfeefrom)
 
         # Here we still have only utxos with amount 5000
         # check calls without change:
@@ -268,14 +283,29 @@ class GraveTest(BitcoinTestFramework):
         self.check_sendtoaddress(node0, addr1, amount, subtractfeefromamount=False, changeToNewAddress=True)
 
         # No chance to pay 3% burn from addr1 amount - too little:
-        assert_raises_rpc_error(None, 'The transaction amount is too small to pay the fee', self.check_sendmany, node0, {addr1: amount * 2, addr2: amount * 100}, changeToNewAddress=False, subtractfeefrom=[addr1])
+        assert_raises_rpc_error(None, TOO_SMALL_TO_PAY_FEE, self.check_sendmany, node0,
+                                {addr1: amount * 2, addr2: amount * 100}, changeToNewAddress=False,
+                                subtractfeefrom=[addr1])
 
         # From both no chance too:
-        assert_raises_rpc_error(None, 'The transaction amount is too small to pay the fee', self.check_sendmany, node0, {addr1: amount, addr2: amount * 100}, changeToNewAddress=False, subtractfeefrom=[addr1, addr2])
+        assert_raises_rpc_error(None, TOO_SMALL_TO_PAY_FEE, self.check_sendmany, node0,
+                                {addr1: amount, addr2: amount * 100}, changeToNewAddress=False,
+                                subtractfeefrom=[addr1, addr2])
 
         # But if to pay it from addr2 - OK:
-        self.check_sendmany(node0, {addr1: amount * 2, addr2: amount * 100}, changeToNewAddress=False, subtractfeefrom=[addr2])
+        self.check_sendmany(node0, {addr1: amount * 2, addr2: amount * 100}, changeToNewAddress=False,
+                            subtractfeefrom=[addr2])
 
+        for changeToNewAddress in [False, True]:
+            self.check_sendtoaddress(node0, addr1, small_amount_good, changeToNewAddress=changeToNewAddress)
+            self.check_sendmany(node0, {addr1: small_amount_good}, changeToNewAddress=changeToNewAddress,
+                                subtractfeefrom=[])
+            self.check_sendmany(node0, {addr1: small_amount_good / 2, addr2: small_amount_good / 2},
+                                changeToNewAddress=changeToNewAddress, subtractfeefrom=[])
+
+        # With parameter subtractfeefromamount=True small_amount_good is still too small and will fail:
+        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendtoaddress, addr1, small_amount_good, '', '', True)
+        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendmany, '', {addr1: small_amount_good}, 1, '', [addr1])
 
         # Generate utxos:
         (self.my_key1, self.my_pubkey1, self.my_pkh1, self.my_p2pkh_scriptpubkey1, self.my_p2pk_scriptpubkey1) = create_my_key()

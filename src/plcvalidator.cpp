@@ -368,22 +368,6 @@ Validator::Validator()
 }
 
 //******************************************************************************
-//******************************************************************************
-bool Validator::validateChainOfCerts(const std::vector<Certificate> & certs,
-                                     const std::vector<CPubKey> & pubkeys,
-                                     CertParameters & params) const
-{
-    // TODO optimisation
-    std::vector<std::vector<unsigned char> > pks;
-    for (const CPubKey& pk : pubkeys)
-    {
-        pks.emplace_back(pk.begin(), pk.end());
-    }
-
-    return validateChainOfCerts(certs, pks, params);
-}
-
-//******************************************************************************
 // reqire cs_main!!!
 //******************************************************************************
 bool Validator::validateChainOfCerts(const std::vector<Certificate>                 & certs,
@@ -413,7 +397,7 @@ bool Validator::validateChainOfCerts(const std::vector<Certificate>             
         }
     }
 
-    bool isKeyFound;
+    bool isKeyFound = false;
     for (const CTxOut & out : Params().GenesisBlock().vtx[0]->vout)
     {
         // at this point pubkeyOrHashUp must be eq one of pubkeys from coinbase

@@ -682,9 +682,9 @@ private:
     bool fBroadcastTransactions;
 
     // taxfree cert
-    std::string                   m_taxfreeCertFileName;
-    std::vector<CPubKey>          m_taxfreePubkeys;
-    std::vector<plc::Certificate> m_taxfreeCerts;
+    std::string                              m_taxfreeCertFileName;
+    std::vector<std::vector<unsigned char> > m_taxfreePubkeys;
+    std::vector<plc::Certificate>            m_taxfreeCerts;
 
 
     /**
