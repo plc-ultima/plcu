@@ -21,8 +21,9 @@
 #include "scheduler.h"
 #include "ui_interface.h"
 #include "utilstrencodings.h"
+#ifdef ENABLE_WALLET
 #include "wallet/wallet.h"
-
+#endif
 #ifdef WIN32
 #include <string.h>
 #else

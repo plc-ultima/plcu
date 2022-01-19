@@ -69,8 +69,8 @@ Parameters description:
                                     #   2: regular P2PKH transaction, not certificate
                                     #   3: invalid certificate: transfers money to another P2PKH address, not to itself
                                     #   4: another root certificate, not a parent of user certificate (CA3 keys in root and user certificates are different)
-                                    #   5: invalid root certificate, with unknown root key not mentioned in genezis block
-                                    #   60-69: root certificate with root key mentioned in genezis block, but not in the first entry: 6x, where x is index, example: 62 means use key[2]
+                                    #   5: invalid root certificate, with unknown root key not mentioned in genesis block
+                                    #   60-69: root certificate with root key mentioned in genesis block, but not in the first entry: 6x, where x is index, example: 62 means use key[2]
                                     #   20: invalid signature of block1 in scriptPubKey [block1 signature(block1) OP_2DROP ...] (invalid sig_hash)
                                     #   21: invalid signature of block1 in scriptPubKey [block1 signature(block1) OP_2DROP ...] (signed with another key)
                                     #   22: invalid signature of block1 in scriptPubKey [block1 signature(block1) OP_2DROP ...] (corrupted signature)
@@ -235,7 +235,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_base_e',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -243,7 +243,7 @@ testcases_templates = \
     {
         # lock_intervals > 1y: accepted
         'name': 'shu_01',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 30 * COIN,
         'lock_intervals': (3 * ONE_YEAR,),
         'accepted': True,
@@ -251,7 +251,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_01e',
-        'use_testcase': 'shu_01',
+        'parent_testcase': 'shu_01',
         'rewardamount': 30 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -259,7 +259,7 @@ testcases_templates = \
     {
         # lock_intervals < 1y: accepted
         'name': 'shu_02',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN // 4,
         'lock_intervals': (ONE_YEAR // 4,),
         'accepted': True,
@@ -267,7 +267,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_02e',
-        'use_testcase': 'shu_02',
+        'parent_testcase': 'shu_02',
         'rewardamount': 10 * COIN // 4 + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -275,7 +275,7 @@ testcases_templates = \
     {
         # user outputs to user, not locked: rejected
         'name': 'shu_03e',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN,
         'user_outputs_dest': 'user',
         'accepted': False,
@@ -284,7 +284,7 @@ testcases_templates = \
     {
         # user outputs to user_locked + user_locked in proportion (3:1): count only 1 with max amount: accepted
         'name': 'shu_04',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN * 3 // 4,
         'user_outputs_dest': 'user_locked+user_locked',
         'user_outputs_ratio': '3:1',
@@ -294,7 +294,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_04e',
-        'use_testcase': 'shu_04',
+        'parent_testcase': 'shu_04',
         'rewardamount': 10 * COIN * 3 // 4 + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -302,7 +302,7 @@ testcases_templates = \
     {
         # user outputs to user + user_locked in proportion (3:1): count only locked one with max amount: accepted
         'name': 'shu_05',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN // 4,
         'user_outputs_dest': 'user+user_locked',
         'user_outputs_ratio': '3:1',
@@ -312,7 +312,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_05e',
-        'use_testcase': 'shu_05',
+        'parent_testcase': 'shu_05',
         'rewardamount': 10 * COIN // 4 + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -320,7 +320,7 @@ testcases_templates = \
     {
         # base positive scenario, but without sivler_hoof flag: rejected
         'name': 'shu_06e',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'sivler_hoof': False,
         'accepted': False,
         'error': (64, BAD_REWARD_NOT_MATURE),
@@ -329,7 +329,7 @@ testcases_templates = \
         # lock user outputs and then spend them in step2: accepted
         # only available in singlesig model
         'name': 'shu_07',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN // 4,
         'sig_model': 'singlesig',
         'user_outputs_dest': ['user+user_locked', 'user_locked+user_locked'],
@@ -346,7 +346,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_07e',
-        'use_testcase': 'shu_07',
+        'parent_testcase': 'shu_07',
         'step2_rewardamount': 10 * COIN // 2 + DELTA_REWARD,
         'step2_accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -355,7 +355,7 @@ testcases_templates = \
     {
         # (rootcertamount < ca3certamount), use ca3certamount: accepted
         'name': 'shu_08',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rootcertamount': 500000,
         'rewardamount': 5 * COIN,
         'accepted': True,
@@ -363,7 +363,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_08e',
-        'use_testcase': 'shu_08',
+        'parent_testcase': 'shu_08',
         'rewardamount': 5 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -371,7 +371,7 @@ testcases_templates = \
     {
         # (ca3certamount < rootcertamount), use rootcertamount: accepted
         'name': 'shu_09',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'ca3certamount': 200000,
         'rewardamount': 2 * COIN,
         'accepted': True,
@@ -379,7 +379,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_09e',
-        'use_testcase': 'shu_09',
+        'parent_testcase': 'shu_09',
         'rewardamount': 2 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -387,7 +387,7 @@ testcases_templates = \
     {
         # reward to ben+other, reward per transaction, not per output: accepted
         'name': 'shu_10',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'reward_to': 'ben+other',
         'rewardamount': 10 * COIN,
         'accepted': True,
@@ -395,7 +395,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_10e',
-        'use_testcase': 'shu_10',
+        'parent_testcase': 'shu_10',
         'rewardamount': 10 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -403,7 +403,7 @@ testcases_templates = \
     {
         # large amounts, small percent and lock period: accepted
         'name': 'shu_11',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rootcertamount': 100000,  # 1 % per year
         'useramount': 100000 * COIN,
         'rewardamount': 1000 * COIN // 365 // 24,
@@ -413,7 +413,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_11e',
-        'use_testcase': 'shu_11',
+        'parent_testcase': 'shu_11',
         'rewardamount': 1600 * COIN // 365 // 24 + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -421,7 +421,7 @@ testcases_templates = \
     {
         # large amounts, large percent and lock period: accepted
         'name': 'shu_12',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rootcertamount': 10000000,  # 100 % per year
         'ca3certamount': 10000000,  # 100 % per year
         'useramount': 20000 * COIN,
@@ -432,7 +432,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_12e',
-        'use_testcase': 'shu_12',
+        'parent_testcase': 'shu_12',
         'rewardamount': 40000 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -440,7 +440,7 @@ testcases_templates = \
     {
         # multiple user_locked outputs: accepted
         'name': 'shu_13',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'rewardamount': 10 * COIN * 95 // 100,
         'user_outputs_dest': 'user_locked+' * 6,
         'user_outputs_ratio': '95:1:1:1:1:1',
@@ -450,7 +450,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_13e',
-        'use_testcase': 'shu_13',
+        'parent_testcase': 'shu_13',
         'rewardamount': 10 * COIN * 95 // 100 + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -458,7 +458,7 @@ testcases_templates = \
     {
         # reward to user and/or user_locked (with separate output): burn is not needed: accepted
         'name': 'shu_14',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'ben_enabled': False,
         'reward_to': ['user', 'user_locked', 'user+user_locked'],
         'join_user_reward_to_user_outputs': False,
@@ -469,7 +469,7 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_14e',
-        'use_testcase': 'shu_14',
+        'parent_testcase': 'shu_14',
         'rewardamount': 10 * COIN + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
@@ -477,7 +477,7 @@ testcases_templates = \
     {
         # reward to user_locked (increasing existing locked user output and consequently reward calc base), burn is not needed: accepted
         'name': 'shu_15',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'ben_enabled': False,
         'reward_to': 'user_locked',
         'join_user_reward_to_user_outputs': True,
@@ -488,33 +488,173 @@ testcases_templates = \
     {
         # previous case, rewardamount is more than allowed: rejected
         'name': 'shu_15e',
-        'use_testcase': 'shu_15',
+        'parent_testcase': 'shu_15',
         'rewardamount': 100 * COIN // 9 + DELTA_REWARD,
         'accepted': False,
         'error': (64, BAD_REWARD_ROBBERY),
     },
     {
-        # BC-617: root certificate created after block 256 is invalid
+        # BC-617: root certificate created after block 512 is invalid
         'name': 'shu_16',
-        'use_testcase': 'shu_base',
-        'blockchain_height': 254,
+        'parent_testcase': 'shu_base',
+        'blockchain_height': 510,
         'accepted': True,
     },
     {
-        # previous case, (blockchain_height == 256): rejected
+        # previous case, (blockchain_height == 512): rejected
         'name': 'shu_16e',
-        'use_testcase': 'shu_16',
-        'blockchain_height': 256,
+        'parent_testcase': 'shu_16',
+        'blockchain_height': 512,
         'accepted': False,
         'error': (64, BAD_PLC_CERTIFICATE),
     },
     {
         # invalid_root_cert = [60-69] is valid
         'name': 'shu_17',
-        'use_testcase': 'shu_base',
+        'parent_testcase': 'shu_base',
         'invalid_root_cert': list(range(60,70)),
         'accepted': True,
     },
+    {
+        # use (separate_white == True) in minting 3.0: accepted
+        'name': 'shu_18',
+        'parent_testcase': 'shu_base',
+        'separate_white': True,
+        'accepted': True,
+    },
+
+    #
+    # E (error) series:
+    #
+    {
+        # (revoke_root_cert): rejected
+        'name': 'shu_e01',
+        'parent_testcase': 'shu_base',
+        'revoke_root_cert': True,
+        'accepted': False,
+        'error': (64, BAD_PLC_CERTIFICATE),
+    },
+    {
+        # (revoke_user_cert): rejected
+        'name': 'shu_e02',
+        'parent_testcase': 'shu_base',
+        'revoke_user_cert': True,
+        'accepted': False,
+        'error': (64, BAD_PLC_CERTIFICATE),
+    },
+    {
+        # (invalid_root_cert, scenarios 1-5, 20-23): rejected
+        'name': 'shu_e03',
+        'parent_testcase': 'shu_base',
+        'invalid_root_cert': [1, 2, 3, 4, 5, 20, 21, 22, 23],
+        'accepted': False,
+        'error': (64, BAD_PLC_CERTIFICATE),
+    },
+    {
+        # (invalid_user_cert, scenarios 1-4, 20-23): rejected
+        # scenario 5 was invalid in minting 1.0, but is valid in 3.0
+        'name': 'shu_e04',
+        'parent_testcase': 'shu_base',
+        'invalid_user_cert': [1, 2, 3, 4, 20, 21, 22, 23],
+        'accepted': False,
+        'error': (64, [BAD_PLC_CERTIFICATE, BAD_REWARD_SCRIPT, BAD_REWARD_INV_USER_ADDRESS]),
+    },
+    {
+        # invalid_refill_moneybox, scenarios 1-5: minting is accepted, refill_moneybox is rejected
+        'name': 'shu_e05',
+        'parent_testcase': 'shu_base',
+        'refill_moneybox': 'script',
+        'invalid_refill_moneybox': [1, 2, 3, 4, 5],
+        'blockchain_height': [499, 501],
+        'useramount': 10000 * COIN,
+        'rewardamount': 10000 * COIN,
+        'lock_intervals': (ONE_YEAR * 10,),
+        'accepted': True,
+        'refill_moneybox_accepted': False,
+    },
+    {
+        # forbidden refill_moneybox_dest: minting is accepted, refill_moneybox is rejected
+        'name': 'shu_e06',
+        'parent_testcase': 'shu_base',
+        'refill_moneybox': 'script',
+        'refill_moneybox_dest': ['user', 'ben', 'other', 'other_p2sh'],
+        'accepted': True,
+        'refill_moneybox_accepted': False,
+    },
+    {
+        # (moneybox_outputs_count == 2): rejected
+        'name': 'shu_e07',
+        'parent_testcase': 'shu_base',
+        'moneybox_change_dest': 'moneybox+moneybox',  # means (moneybox_outputs_count == 2)
+        'accepted': False,
+        'error': (64, BAD_REWARD_MANY_MONEYBOX_OUTPUTS),
+    },
+    {
+        # moneybox_change_dest == [forbidden combinations]: rejected
+        'name': 'shu_e08',
+        'parent_testcase': 'shu_base',
+        'moneybox_change_dest': ['user', 'ben', 'other_p2pkh', 'other_p2sh', 'user+ben'],
+        'accepted': False,
+    },
+    {
+        # extra_moneybox_inputs_count == 1: rejected
+        'name': 'shu_e09',
+        'parent_testcase': 'shu_base',
+        'extra_moneybox_inputs_count': 1,
+        'accepted': False,
+        'error': (16, 'bad-txns-moneybox-value-toolarge'),
+    },
+    {
+        # extra_moneybox_inputs_count == 1: rejected
+        'name': 'shu_e10',
+        'parent_testcase': 'shu_base',
+        'extra_moneybox_inputs_count': 1,
+        'moneybox_change_dest': 'moneybox+moneybox',
+        'accepted': False,
+        'error': (64, [BAD_REWARD_MANY_MONEYBOX_INPUTS, BAD_REWARD_MANY_MONEYBOX_OUTPUTS]),
+    },
+    {
+        # both (user_outputs_dest and moneybox_change_dest) == nothing: rejected
+        'name': 'shu_e11',
+        'parent_testcase': 'shu_base',
+        'user_outputs_dest': '',
+        'moneybox_change_dest': '',
+        'accepted': False,
+    },
+    {
+        # useramount == 0 (no user inputs), user_outputs_dest == '' (no user outputs): rejected
+        'name': 'shu_e12',
+        'parent_testcase': 'shu_base',
+        'useramount': 0,
+        'reward_to': 'ben',
+        'user_outputs_dest': '',
+        'accepted': False,
+    },
+    {
+        # invalid_signature: rejected
+        'name': 'shu_e13',
+        'parent_testcase': 'shu_base',
+        'invalid_signature': [100, 101, 102, 110, 200],
+        'accepted': False,
+        'error': (16, 'mandatory-script-verify-flag-failed'),
+    },
+    {
+        # invalid_signature in moneybox inputs: rejected
+        'name': 'shu_e14',
+        'parent_testcase': 'shu_base',
+        'invalid_signature': [201, 202, 203, 210],
+        'accepted': False,
+        'error': (64, [BAD_REWARD_INV_SIGNATURE, BAD_PLC_CERTIFICATE, NON_CANONICAL_SIGNATURE]),
+    },
+    {
+        # zero_change_to_moneybox: rejected
+        'name': 'shu_e15',
+        'parent_testcase': 'shu_base',
+        'zero_change_to_moneybox': 1,
+        'accepted': False,
+        'error': (64, DUST),
+    },
+
 ]
 
 
@@ -567,8 +707,8 @@ def get_minting_testcases():
     if len(testcases_map) > 0:
         return testcases_map
     for t in testcases_templates:
-        if 'use_testcase' in t:
-            parent_testcase_name = t['use_testcase']
+        if 'parent_testcase' in t:
+            parent_testcase_name = t['parent_testcase']
             assert parent_testcase_name != t['name']
             parent_testcase = find_parent_testcase(testcases_templates, parent_testcase_name)
             for key in parent_testcase:

@@ -53,14 +53,10 @@ class WalletAccountsTest(BitcoinTestFramework):
         # There's some fee that will come back to us when the miner reward
         # matures.
         common_address = AddressFromPubkey(b'pubkey56')
-        amount = BASE_CB_AMOUNT*2
-        (burn1, burn2, rest) = BurnedAndChangeAmount(amount)
-        rest -= ToCoins(2)  # lets take extra 1 satoshi per each burn output due to rounding/truncation
-        utxos = node.listunspent()
-        self.log.debug(f'will send: common_address: {common_address}, amount: {amount}, rest: {rest}, burn1: {burn1}, burn2: {burn2}, balance: {node.getbalance()}, utxos ({len(utxos)}): {utxos}')
+        amount = BASE_CB_AMOUNT * 2
         txid = node.sendmany(
             fromaccount="",
-            amounts={common_address: rest},
+            amounts={common_address: amount},
             subtractfeefrom=[common_address],
             minconf=1,
         )

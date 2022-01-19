@@ -611,12 +611,12 @@ bool checkBurnedAmount(const std::vector<CTxIn> & vin,
             if (std::equal(out.scriptPubKey.begin_skipLeadingData(), out.scriptPubKey.end(), itm.first.begin_skipLeadingData()))
             {
                 // found, check amount
-                if (out.nValue < static_cast<CAmount>(totalOut * itm.second))
+                CAmount neededValue = static_cast<CAmount>(totalOut * itm.second);
+                if (out.nValue < neededValue)
                 {
                     // bad amount
                     LogPrintf("bad-burned, must be burned: %d (%.4f%%), transferred: %d, burned: %d\n",
-                              static_cast<CAmount>(totalOut * itm.second), itm.second * 100,
-                              totalOut, out.nValue);
+                              neededValue, itm.second * 100, totalOut, out.nValue);
                     return false;
                 }
 

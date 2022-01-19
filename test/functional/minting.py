@@ -1309,21 +1309,23 @@ class MintingTest(BitcoinTestFramework):
         assert_in(utxo_hash_hex, self.txmap)
         prevtx = self.txmap[utxo_hash_hex]
         assert_greater_than(len(prevtx.vout), utxo.n)
-        amount = prevtx.vout[utxo.n].nValue
-        amount_orig = amount
-        amount -= ToSatoshi('0.001')
+        amount = ToCoins(prevtx.vout[utxo.n].nValue)
+        fee = Decimal('0.00001')
+        (burn1, burn2, rest) = BurnedAndChangeAmount(amount - fee)
         prevScriptPubKey = prevtx.vout[utxo.n].scriptPubKey
         tx4 = CTransaction()
         tx4.vin.append(CTxIn(utxo, b"", 0xffffffff))
-        tx4.vout.append(CTxOut(amount, GetP2PKHScript(hash160(b'xyu')))) # send money to 'xyu'
+        tx4.vout.append(CTxOut(ToSatoshi(rest), GetP2PKHScript(hash160(b'xyu')))) # send money to 'xyu'
+        tx4.vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        tx4.vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         (sig_hash, err) = SignatureHash(prevScriptPubKey, tx4, 0, SIGHASH_ALL)
         assert (err is None)
         signature = key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
         tx4.vin[0].scriptSig = CScript([signature, key.get_pubkey()])
         tx4.rehash()
 
-        self.log.debug('spend_utxo, utxo: {}, amount: {}, amount_orig: {}, pubkeyhash: {}, txid: {}, prevScriptPubKey ({}): {}, reason: {}'.
-                       format(utxo, amount, amount_orig, bytes_to_hex_str(reverse(hash160(key.get_pubkey()))), tx4.hash,
+        self.log.debug('spend_utxo, utxo: {}, amount: {}, amount_sent: {}, pubkeyhash: {}, txid: {}, prevScriptPubKey ({}): {}, reason: {}'.
+                       format(utxo, amount, rest, bytes_to_hex_str(reverse(hash160(key.get_pubkey()))), tx4.hash,
                               len(prevScriptPubKey), bytes_to_hex_str(prevScriptPubKey), reason))
 
         tx_message = msg_tx(tx4)
@@ -1380,7 +1382,7 @@ class MintingTest(BitcoinTestFramework):
             # another root certificate, not a parent of user certificate (CA3 keys in root and user certificates are different)
             pass
         elif self.invalid_root_cert == 5:
-            # invalid root certificate, with unknown root key not mentioned in genezis block
+            # invalid root certificate, with unknown root key not mentioned in genesis block
             fake_genezis_key = self.create_key('fake_genezis_key')
             (utxo_coins_root, _) = self.pay_to_address(AddressFromPubkey(fake_genezis_key.get_pubkey()),
                                                        rootcertamount + burn + fee,
@@ -1391,10 +1393,10 @@ class MintingTest(BitcoinTestFramework):
             assert_equal(len(ca3_keys), 1)
             ca3_key = ca3_keys[0]
         elif self.invalid_root_cert in list(range(60,70)):
-            # use GENEZIS_PRIV_KEY_N instead of GENEZIS_PRIV_KEY0:
+            # use GENESIS_PRIV_KEY_N instead of GENESIS_PRIV_KEY0:
             index = self.invalid_root_cert - 60
             genezis_key1 = CECKey()
-            genezis_key1.set_secretbytes(Base58ToSecretBytes(GENEZIS_PRIV_KEYS[index]))
+            genezis_key1.set_secretbytes(Base58ToSecretBytes(GENESIS_PRIV_KEYS[index]))
             if not genezis_key1.is_compressed():
                 genezis_key1.set_compressed(True)
             (utxo_coins_root, _) = self.pay_to_address(AddressFromPubkey(genezis_key1.get_pubkey()),
