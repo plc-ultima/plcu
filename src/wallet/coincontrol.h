@@ -45,7 +45,7 @@ public:
         fAllowOtherInputs                  = false;
         fAllowWatchOnly                    = false;
         fOverrideFeeRate                   = false;
-        fReturnChangeToAddressFromInputSet = false;
+        fReturnChangeToAddressFromInputSet = true;
         setSelected.clear();
         m_feerate.reset();
         m_confirm_target.reset();

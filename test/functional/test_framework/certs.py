@@ -79,7 +79,13 @@ def flags_to_str(flags):
     return ' | '.join(flagsss)
 
 
-def send_tx(node, test_node, tx, accepted, reject_reason=None):
+def process_reject_message(test_node, reject_reason, accepted):
+    if not accepted and reject_reason:
+        assert_startswith(test_node.reject_message.reason.decode('ascii'), reject_reason)
+    test_node.reject_message = None
+
+
+def send_tx(node, test_node, tx, accepted, reject_reason=None, try_mine_in_block=True):
     # for input in tx.vin:
     #     txid_hex = '%064x' % (input.prevout.hash)
     #     logger.debug(f'parent tx: {node.getrawtransaction(txid_hex, 1)}')
@@ -96,16 +102,15 @@ def send_tx(node, test_node, tx, accepted, reject_reason=None):
     # Ensure our transaction is accepted by the node and is included into mempool:
     assert_equal(tx.hash in node.getrawmempool(), accepted)
 
-    if not accepted and reject_reason:
-        assert_startswith(test_node.reject_message.reason.decode('ascii'), reject_reason)
-    test_node.reject_message = None
+    process_reject_message(test_node, reject_reason, accepted)
 
-    if not accepted:
+    if not accepted and try_mine_in_block:
         # Try to create a block with a bad tx, and ensure the node will not accept it too:
         bestblockhash_before = node.getbestblockhash()
         block_time = node.getblock(bestblockhash_before)['time'] + 1
         height = node.getblockcount() + 1
         block = create_block(int(bestblockhash_before, 16), create_coinbase(height), block_time)
+        block.nVersion = VB_TOP_BITS
         block.vtx.extend([tx])
         block.hashMerkleRoot = block.calc_merkle_root()
         block.solve()
@@ -114,6 +119,7 @@ def send_tx(node, test_node, tx, accepted, reject_reason=None):
         test_node.send_message(block_message)
         test_node.sync_with_ping()
         assert_equal(bestblockhash_before, node.getbestblockhash())
+        process_reject_message(test_node, reject_reason, accepted)
     return tx.hash if accepted else None
 
 

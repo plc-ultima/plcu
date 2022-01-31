@@ -2895,6 +2895,7 @@ UniValue fundrawtransaction(const JSONRPCRequest& request)
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "changeAddress must be a valid plcultima address");
 
             coinControl.destChange = address.Get();
+            coinControl.fReturnChangeToAddressFromInputSet = false;
         }
 
         if (options.exists("changePosition"))

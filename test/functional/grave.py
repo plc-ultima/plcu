@@ -80,7 +80,7 @@ class GraveTest(BitcoinTestFramework):
         signature = self.my_key1.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
         tx1.vin[0].scriptSig = CScript([signature, self.my_pubkey1])
         tx1.rehash()
-        return send_tx(self.nodes[0], self.test_node, tx1, accepted, reject_reason)
+        return send_tx(self.nodes[0], self.test_node, tx1, accepted, reject_reason, False)
 
 
     def check_sendtoaddress(self, node, address, amount, subtractfeefromamount=False, changeToNewAddress=False, changeExists=None):
@@ -231,21 +231,6 @@ class GraveTest(BitcoinTestFramework):
         self.log.info(f'addr1: {addr1}, addr2: {addr2}, addr3: {addr3}, grave1: {GRAVE_ADDRESS_1}, grave2: {GRAVE_ADDRESS_2}')
 
         (burn1, burn2) = GetBurnedValue(Decimal(6))
-        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendmany, '',
-                                {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3,
-                                 GRAVE_ADDRESS_1: burn1})
-        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendmany, '',
-                                {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3,
-                                 GRAVE_ADDRESS_2: burn2})
-        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendmany, '',
-                                {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3,
-                                 GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
-        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendmany, '', {addr1: small_amount_bad})
-        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendmany, '',
-                                {addr1: small_amount_bad / 2, addr2: small_amount_bad / 2})
-        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendtoaddress, GRAVE_ADDRESS_1, burn1)
-        assert_raises_rpc_error(None, ADDRESS_PROHIBITED, node0.sendtoaddress, GRAVE_ADDRESS_2, burn2)
-        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendtoaddress, addr1, small_amount_bad)
 
         # Node has only utxos with amount=5000, no chance to pay fee and burn for full 5000 (changeToNewAddress=True and subtractfeefromamount=True) from small dest amount:
         assert_raises_rpc_error(None, TOO_SMALL_TO_PAY_FEE, self.check_sendtoaddress, node0, addr1, amount,
@@ -303,9 +288,15 @@ class GraveTest(BitcoinTestFramework):
             self.check_sendmany(node0, {addr1: small_amount_good / 2, addr2: small_amount_good / 2},
                                 changeToNewAddress=changeToNewAddress, subtractfeefrom=[])
 
-        # With parameter subtractfeefromamount=True small_amount_good is still too small and will fail:
-        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendtoaddress, addr1, small_amount_good, '', '', True)
-        assert_raises_rpc_error(None, BURN_AMOUNT_TOO_SMALL, node0.sendmany, '', {addr1: small_amount_good}, 1, '', [addr1])
+        # Ensure node allows to send coins to grave addresses:
+        node0.sendmany('', {GRAVE_ADDRESS_1: burn1})
+        node0.sendmany('', {GRAVE_ADDRESS_2: burn2})
+        node0.sendmany('', {GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
+        node0.sendmany('', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_1: burn1})
+        node0.sendmany('',{node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_2: burn2})
+        node0.sendmany('', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
+        node0.sendtoaddress(GRAVE_ADDRESS_1, burn1)
+        node0.sendtoaddress(GRAVE_ADDRESS_2, burn2)
 
         # Generate utxos:
         (self.my_key1, self.my_pubkey1, self.my_pkh1, self.my_p2pkh_scriptpubkey1, self.my_p2pk_scriptpubkey1) = create_my_key()

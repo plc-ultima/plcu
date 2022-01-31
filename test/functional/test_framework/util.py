@@ -667,8 +667,9 @@ def ToSatoshi(amount):
     print('amount: {}, type: {}'.format(amount, type(amount)))
     assert(0)
 
-def generate_many_blocks(node, count, limit_per_call = 200):
-    logger.info(f'Will generate {count} blocks: {node.getblockcount()} --> {node.getblockcount() + count}')
+def generate_many_blocks(node, count, limit_per_call = 100):
+    logger.debug(f'Will generate {count} blocks: {node.getblockcount()} --> {node.getblockcount() + count}')
+    assert_greater_than(count, 0)
     assert_greater_than(limit_per_call, 0)
     blocks = []
     while count > 0:

@@ -195,7 +195,7 @@ class SuperTxTest(BitcoinTestFramework):
         for addr in addresses_and_amounts:
             amount_sum += addresses_and_amounts[addr]
         balance_before = node0.getbalance('', 0)
-        self.log.debug(f'check sendmany: node: 0, balance: {balance_before}, amount_sum: {amount_sum}, addresses_and_amounts: {addresses_and_amounts}, subtractfeefrom: {subtractfeefrom}, valid_cert: {valid_cert}, height: {node0.getblockcount()}s')
+        self.log.debug(f'check sendmany: node: 0, balance: {balance_before}, amount_sum: {amount_sum}, addresses_and_amounts: {addresses_and_amounts}, subtractfeefrom: {subtractfeefrom}, valid_cert: {valid_cert}, height: {node0.getblockcount()}')
         txid = node0.sendmany('', addresses_and_amounts, 1, '', subtractfeefrom)
         assert_in(txid, node0.getrawmempool())
         txraw = node0.getrawtransaction(txid, 1)
