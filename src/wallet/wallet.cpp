@@ -2793,6 +2793,23 @@ bool getScriptChange(CReserveKey & reservekey, std::string & strFailReason,
 
 //******************************************************************************
 //******************************************************************************
+CAmount calcBurnAmount(const CAmount & transferAmount,
+                       std::map<CScript, CAmount> & graveAmounts)
+{
+    CAmount burnedAmount = 0;
+
+    static const std::vector<std::pair<CScript, double> > & graves = Params().graveAddresses();
+    for (const std::pair<CScript, double> & g : graves)
+    {
+        graveAmounts[g.first] = std::max(graveAmounts[g.first], static_cast<CAmount>(transferAmount * g.second));
+        burnedAmount += graveAmounts[g.first];
+    }
+
+    return burnedAmount;
+}
+
+//******************************************************************************
+//******************************************************************************
 std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
                                               const std::vector<CTxOut> & vout);
 
@@ -2808,6 +2825,18 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
 
     nFeeRet = 0;
 
+    const std::vector<std::pair<CScript, double> > & graves = Params().graveAddresses();
+    std::map<CScript, CAmount> graveAmounts;
+    for (const std::pair<CScript, double> & p : graves)
+    {
+        graveAmounts[p.first] = 0;
+    }
+
+    bool is_taxFree     = (m_taxfreePubkeys.size() > 0 &&
+                           m_taxfreeCerts.size() > 0);
+    bool is_sendToSelf  = false;
+    bool is_sendToGrave = false;
+
     // check recipients
     CAmount      sendAmount             = 0;
     unsigned int nSubtractFeeFromAmount = 0;
@@ -2818,20 +2847,23 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
             return false;
         }
 
-        for (const auto& recipient : vecSend)
+        for (const auto & recipient : vecSend)
         {
-            if (Params().isGrave(recipient.scriptPubKey))
-            {
-                strFailReason = _("Address prohibited");
-                return false;
-            }
-
             if (sendAmount < 0 || recipient.nAmount < 0)
             {
                 strFailReason = _("Transaction amounts must not be negative");
                 return false;
             }
-            sendAmount += recipient.nAmount;
+
+            if (!Params().isGrave(recipient.scriptPubKey))
+            {
+                sendAmount += recipient.nAmount;
+            }
+            else
+            {
+                is_sendToGrave = true;
+                graveAmounts[recipient.scriptPubKey] += recipient.nAmount;
+            }
 
             if (recipient.fSubtractFeeFromAmount)
             {
@@ -2839,12 +2871,6 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
             }
         }
     } // check recipients
-
-    // initial calc burn amount
-    bool is_taxFree    = (m_taxfreePubkeys.size() > 0 &&
-                          m_taxfreeCerts.size() > 0);
-    bool is_sendToSelf = false;
-    const std::vector<std::pair<CScript, double> > & graves = Params().graveAddresses();
 
     wtxNew.fTimeReceivedIsTxTime = true;
     wtxNew.BindWallet(this);
@@ -2874,16 +2900,19 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
     // create transaction
     CAmount selectedAmount  = 0;
     CAmount transferAmount  = sendAmount;
-    CAmount burnedAmount    = (is_taxFree || is_sendToSelf) ? 0 : transferAmount * Params().gravePercent();
+    CAmount burnedAmount    = (is_taxFree || is_sendToSelf) ? 0 : calcBurnAmount(transferAmount, graveAmounts);
     CAmount feeAmount       = 0;
     CAmount neededAmount    = sendAmount + (nSubtractFeeFromAmount == 0 ? (feeAmount + burnedAmount) : 0);
     bool    needSelectAgain = true;
+    int     changePosInOut  = nChangePosInOut;
 
     FeeCalculation feeCalc;
     uint32_t       nBytes = 0;
 
     while (true)
     {
+        // init tx
+        changePosInOut = nChangePosInOut;
         txNew.vin.clear();
         txNew.vout.clear();
 
@@ -2911,11 +2940,30 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
         // or if fee paid by the receiver
         if (!coin_control.fReturnChangeToAddressFromInputSet || nSubtractFeeFromAmount > 0)
         {
+            // reinit graves
+            {
+                for (const std::pair<CScript, double> & p : graves)
+                {
+                    graveAmounts[p.first] = 0;
+                }
+                for (const auto & recipient : vecSend)
+                {
+                    if (Params().isGrave(recipient.scriptPubKey))
+                    {
+                        graveAmounts[recipient.scriptPubKey] += recipient.nAmount;
+                    }
+                }
+            }
+
             CAmount newTransferAmount = ((!coin_control.fReturnChangeToAddressFromInputSet) ?
                                         selectedAmount : sendAmount);
 
-            burnedAmount   = (is_taxFree || is_sendToSelf) ? 0 : static_cast<CAmount>((newTransferAmount - feeAmount) * 0.03 / 1.03);
-            transferAmount = newTransferAmount - burnedAmount - feeAmount;
+            burnedAmount = (is_taxFree || is_sendToSelf) ?
+                        0 :
+                        calcBurnAmount(static_cast<CAmount>((newTransferAmount - feeAmount) /
+                                                            (1 + Params().gravePercent())),
+                                                                            graveAmounts);
+            transferAmount = std::max(CAmount(0), newTransferAmount - burnedAmount - feeAmount);
         }
 
         neededAmount   = sendAmount + (nSubtractFeeFromAmount == 0 ? (feeAmount + burnedAmount) : 0);
@@ -2946,6 +2994,12 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
             {
                 txNew.vin.push_back(CTxIn(coin.outpoint,CScript(), nSequence));
             }
+
+            // tax free marker
+            if (is_taxFree)
+            {
+                txNew.vin.emplace_back(uint256(), 0);
+            }
         } // vins
 
         {
@@ -2957,20 +3011,20 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
             bool fFirst = true;
             for (const auto & recipient : vecSend)
             {
-                CTxOut txout(recipient.nAmount, recipient.scriptPubKey);
-
+                CAmount subAmount = 0;
                 if (recipient.fSubtractFeeFromAmount)
                 {
                     // Subtract fee equally from each selected recipient
-                    txout.nValue -= fullFeeAmount / nSubtractFeeFromAmount;
-
+                    subAmount = fullFeeAmount / nSubtractFeeFromAmount;
                     // first receiver pays the remainder not divisible by output count
                     if (fFirst)
                     {
                         fFirst = false;
-                        txout.nValue -= fullFeeAmount % nSubtractFeeFromAmount;
+                        subAmount += fullFeeAmount % nSubtractFeeFromAmount;
                     }
                 }
+
+                CTxOut txout(recipient.nAmount - subAmount, recipient.scriptPubKey);
 
                 if (IsDust(txout, ::dustRelayFee))
                 {
@@ -2985,7 +3039,27 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
                         strFailReason = _("Transaction amount too small");
                     return false;
                 }
-                txNew.vout.push_back(txout);
+
+                if (Params().isGrave(recipient.scriptPubKey))
+                {
+                    graveAmounts[recipient.scriptPubKey] -= subAmount;
+                }
+                else
+                {
+                    txNew.vout.push_back(txout);
+                }
+            }
+
+            // burn
+            if (!is_taxFree && !is_sendToSelf)
+            {
+                for (const std::pair<const CScript, CAmount> & g : graveAmounts)
+                {
+                    if (g.second > 0)
+                    {
+                        txNew.vout.emplace_back(g.second, g.first);
+                    }
+                }
             }
         } // vouts
 
@@ -3001,7 +3075,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
 
             if (changeAmount == 0)
             {
-                nChangePosInOut = -1;
+                changePosInOut = -1;
             }
             else
             {
@@ -3012,29 +3086,29 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
                 // add the dust to the fee.
                 if (IsDust(newTxOut, discardRate))
                 {
-                    nChangePosInOut = -1;
+                    changePosInOut = -1;
                 }
                 else
                 {
-                    if (nChangePosInOut == -1)
+                    if (changePosInOut == -1)
                     {
                         // Insert change txn at random position:
-                        nChangePosInOut = GetRandInt(txNew.vout.size()+1);
+                        changePosInOut = GetRandInt(txNew.vout.size()+1);
                     }
-                    else if ((unsigned int)nChangePosInOut > txNew.vout.size())
+                    else if ((unsigned int)changePosInOut > txNew.vout.size())
                     {
                         strFailReason = _("Change index out of range");
                         return false;
                     }
 
-                    std::vector<CTxOut>::iterator position = txNew.vout.begin() + nChangePosInOut;
+                    std::vector<CTxOut>::iterator position = txNew.vout.begin() + changePosInOut;
                     txNew.vout.insert(position, newTxOut);
                 }
             }
         } // change
 
         // check if send to self
-        if (!is_sendToSelf)
+        if (!is_sendToSelf && !is_sendToGrave)
         {
             std::pair<CAmount, CAmount> amt = getTransferAmount(txNew.vin, txNew.vout);
             if (amt.first == 0)
@@ -3045,21 +3119,6 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
                 continue;
             }
         } // check sendToSelf
-
-        // burn
-        {
-            if (is_taxFree)
-            {
-                txNew.vin.emplace_back(uint256(), 0);
-            }
-            else if (!is_sendToSelf)
-            {
-                for (const std::pair<CScript, double> & pairs : graves)
-                {
-                    txNew.vout.emplace_back(transferAmount * pairs.second, pairs.first);
-                }
-            }
-        } // burn
 
         // fee
         {
@@ -3098,7 +3157,8 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSend,
             }
         } // fee
 
-        nFeeRet = feeAmount;
+        nChangePosInOut = changePosInOut;
+        nFeeRet         = feeAmount;
         break;
     }
 
