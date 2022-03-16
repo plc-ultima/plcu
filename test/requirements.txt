@@ -1,6 +1,7 @@
 crypto 
 cryptography 
 ecdsa 
+packaging
 pycrypto 
 pyzmq 
 scrypt 

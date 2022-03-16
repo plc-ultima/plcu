@@ -142,6 +142,10 @@ static bool DecryptKey(const CKeyingMaterial& vMasterKey, const std::vector<unsi
     return key.VerifyPubKey(vchPubKey);
 }
 
+CCryptoKeyStore::~CCryptoKeyStore() 
+{
+}
+
 bool CCryptoKeyStore::SetCrypted()
 {
     LOCK(cs_KeyStore);

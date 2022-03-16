@@ -461,10 +461,12 @@ bool Validator::validateChainOfCerts(const std::vector<Certificate>             
     params.flags              |= (paramsInternal[certs.size()-1].flags & (freeBen));
     params.flags              |= (paramsInternal[certs.size()-1].flags & (silverHoof));
     params.flags              |= (paramsInternal[certs.size()-1].flags & (shadowEmperor));
+    params.flags              |= (paramsInternal[certs.size()-1].flags & (holyShovel));
 
     if (params.deviceKeyHash.IsNull() &&
             (params.flags & silverHoof) == 0 &&
-            (params.flags & shadowEmperor) == 0)
+            (params.flags & shadowEmperor) == 0 &&
+            (params.flags & holyShovel) == 0)
     {
         LogPrintf("%s: No device h(key) found\n", __func__);
         return false;

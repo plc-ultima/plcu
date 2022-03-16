@@ -31,8 +31,10 @@ class DisableWalletTest (BitcoinTestFramework):
 
         # Checking mining to an address without a wallet. Generating to a valid address should succeed
         # but generating to an invalid address will fail.
-        self.nodes[0].generatetoaddress(1, valid_address)
-        assert_raises_rpc_error(-5, "Invalid fee address", self.nodes[0].generatetoaddress, 1, invalid_address)
+        # Note: now both of them fail
+        # self.nodes[0].generatetoaddress(1, valid_address)
+        assert_raises_rpc_error(-32601, "Method not found (wallet method is disabled because no wallet is loaded)", self.nodes[0].generatetoaddress, 1, valid_address)
+        assert_raises_rpc_error(-32601, "Method not found (wallet method is disabled because no wallet is loaded)", self.nodes[0].generatetoaddress, 1, invalid_address)
 
 if __name__ == '__main__':
     DisableWalletTest ().main ()

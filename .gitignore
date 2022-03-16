@@ -124,3 +124,6 @@ plc-ultima.creator.user*
 plc-ultima.cxxflags
 plc-ultima.files
 plc-ultima.includes
+
+# for python venv:
+env

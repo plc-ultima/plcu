@@ -58,90 +58,35 @@ bool TransactionSignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, 
 
 //******************************************************************************
 //******************************************************************************
-bool loadTaxFreeCert(std::vector<std::vector<unsigned char> > & pubkeys,
-                     std::vector<plc::Certificate> & certs,
-                     std::string & fileName)
-{
-    fs::path fn = gArgs.GetArg("-taxfreecert", "");
-    if (fn.empty())
-    {
-        return false;
-    }
-
-    if (!is_regular_file(fn))
-    {
-        fn = GetDataDir() / fn;
-        if (!is_regular_file(fn))
-        {
-            return false;
-        }
-    }
-
-    fileName = fn.string();
-
-    std::ifstream ifs(fn.string());
-    if (!ifs.good())
-    {
-        return false;
-    }
-
-    std::string data;
-    std::getline(ifs, data, '\0');
-
-    UniValue v(UniValue::VOBJ);
-    if (!v.read(data))
-    {
-        return false;
-    }
-
-    UniValue spubkeys = find_value(v, "pubkeys").get_array();
-    for (uint32_t i = 0; i < spubkeys.size(); ++i)
-    {
-        pubkeys.emplace_back(ParseHex(spubkeys[i].get_str()));
-        if (!CPubKey(pubkeys.back()).IsFullyValid())
-        {
-            return false;
-        }
-    }
-
-    UniValue scerts = find_value(v, "certs").get_array();
-    for (uint32_t i = 0; i < scerts.size(); ++i)
-    {
-        UniValue o = scerts[i].get_obj();
-
-        plc::Certificate cert;
-        cert.txid = uint256S(find_value(o, "txid").get_str());
-        cert.vout = find_value(o, "vout").get_int();
-
-        certs.emplace_back(cert);
-    }
-
-    if (!pubkeys.empty() && !certs.empty())
-    {
-        return true;
-    }
-
-    return false;
-}
-
-//******************************************************************************
-//******************************************************************************
 bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts, SigVersion sigversion) const
 {
-    // load certs
-    std::string fileName;
-    std::vector<std::vector<unsigned char> > pubkeys;
-    std::vector<plc::Certificate> certs;
-    if (!loadTaxFreeCert(pubkeys, certs, fileName))
+    if (txTo->vin.at(nIn).prevout.n == static_cast<uint32_t>(-1))
     {
-        LogPrintStr("TaxFree cert not loaded - " + fileName + "\n");
+        if (!keystore->hasMinerCert())
+        {
+            LogPrintStr("No miner cert\n");
+            return false;
+        }
+    }
+    else if (txTo->vin.at(nIn).prevout.n == 0)
+    {
+        if (!keystore->hasTaxFreeCert())
+        {
+            LogPrintStr("No taxfree cert\n");
+            return false;
+        }
+    }
+    else
+    {
+        LogPrintStr("Incorrect prevout\n");
         return false;
     }
 
-    plc::CertParameters params;
-    if (!plc::Validator().validateChainOfCerts(certs, pubkeys, params))
+    std::vector<std::vector<unsigned char> > pubkeys;
+    std::vector<plc::Certificate> certs;
+    if (!keystore->getCert(pubkeys, certs))
     {
-        LogPrintStr("Invalid cert chain\n");
+        LogPrintStr("TaxFree cert not loaded\n");
         return false;
     }
 
@@ -157,7 +102,7 @@ bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts,
         }
     }
 
-    LogPrintStr("taxfree cert OK - " + fileName + "\nValidate chain");
+    LogPrintStr("taxfree cert OK\n");
 
     // produce signature
     CScript inner;
@@ -177,31 +122,18 @@ bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts,
         signatures[i].push_back((unsigned char)nHashType);
     }
 
-//    CScript tmp;
-//    {
-//        // need to push script (p2sh)
-//        std::vector<unsigned char> vchinner;
-//        std::copy(inner.begin(), inner.end(), std::back_inserter(vchinner));
-//        tmp << vchinner;
-//    }
-
     // push certs and sig
     for (size_t i = 0; i < pubkeys.size(); ++i)
     {
         scripts.emplace_back(CScript(signatures[i].begin(), signatures[i].end()));
         scripts.emplace_back(pubkeys[i].begin(), pubkeys[i].end());
-        // redeem << signatures[i] << std::vector<unsigned char>(pubkeys[i].begin(), pubkeys[i].end());
     }
 
     for (const plc::Certificate & cert : certs)
     {
         scripts.emplace_back(CScript(cert.txid.begin(), cert.txid.end()));
         scripts.emplace_back(CScript(cert.vout));
-        // scripts.emplace_back(CScript() << cert.txid << cert.vout);
     }
-
-//    redeem += tmp;
-//    mtx.vin[i].scriptSig = redeem;
 
     return true;
 }
@@ -567,6 +499,26 @@ static Stacks CombineSignatures(const CScript& scriptPubKey, const BaseSignature
             result.witness = result.script;
             result.script.clear();
             result.witness.push_back(valtype(pubKey2.begin(), pubKey2.end()));
+            return result;
+        }
+    case TX_SUPER:
+        if (sigs1.script.empty())
+            return sigs2;
+        else if (sigs2.script.empty())
+            return sigs1;
+        else
+        {
+            // Recur to combine (like script hash):
+            valtype spk = sigs1.script.back();
+            CScript pubKey2(spk.begin(), spk.end());
+
+            txnouttype txType2;
+            std::vector<std::vector<unsigned char> > vSolutions2;
+            Solver(pubKey2, txType2, vSolutions2);
+            sigs1.script.pop_back();
+            sigs2.script.pop_back();
+            Stacks result = CombineSignatures(pubKey2, checker, txType2, vSolutions2, sigs1, sigs2, sigversion);
+            result.script.push_back(spk);
             return result;
         }
     default:

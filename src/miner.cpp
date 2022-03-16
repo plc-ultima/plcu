@@ -21,6 +21,7 @@
 #include "policy/policy.h"
 #include "pow.h"
 #include "primitives/transaction.h"
+#include "script/sign.h"
 #include "script/standard.h"
 #include "timedata.h"
 #include "txmempool.h"
@@ -28,6 +29,8 @@
 #include "utilmoneystr.h"
 #include "validationinterface.h"
 #include "base58.h"
+#include "plcvalidator.h"
+#include "crypto/crypter.h"
 
 #include <algorithm>
 #include <queue>
@@ -67,13 +70,6 @@ BlockAssembler::Options::Options() {
     nBlockMaxWeight = DEFAULT_BLOCK_MAX_WEIGHT;
 }
 
-BlockAssembler::BlockAssembler(const CChainParams& params, const Options& options) : chainparams(params)
-{
-    blockMinFeeRate = options.blockMinFeeRate;
-    // Limit weight to between 4K and MAX_BLOCK_WEIGHT-4K for sanity:
-    nBlockMaxWeight = std::max<size_t>(4000, std::min<size_t>(MAX_BLOCK_WEIGHT - 4000, options.nBlockMaxWeight));
-}
-
 static BlockAssembler::Options DefaultOptions(const CChainParams& params)
 {
     // Block resource limits
@@ -92,7 +88,32 @@ static BlockAssembler::Options DefaultOptions(const CChainParams& params)
     return options;
 }
 
-BlockAssembler::BlockAssembler(const CChainParams& params) : BlockAssembler(params, DefaultOptions(params)) {}
+CCryptoKeyStore dummyKeyStore;
+
+BlockAssembler::BlockAssembler(const CChainParams & params)
+    : BlockAssembler(dummyKeyStore, params, DefaultOptions(params))
+{}
+
+BlockAssembler::BlockAssembler(const CChainParams & params,
+                               const Options      & options)
+    : BlockAssembler(dummyKeyStore, params, options)
+{}
+
+BlockAssembler::BlockAssembler(const CKeyStore    & keystore,
+                               const CChainParams & params)
+    : BlockAssembler(keystore, params, DefaultOptions(params))
+{}
+
+BlockAssembler::BlockAssembler(const CKeyStore    & keystore,
+                               const CChainParams & params,
+                               const Options      & options)
+    : chainparams(params)
+    , keyStore(keystore)
+{
+    blockMinFeeRate = options.blockMinFeeRate;
+    // Limit weight to between 4K and MAX_BLOCK_WEIGHT-4K for sanity:
+    nBlockMaxWeight = std::max<size_t>(4000, std::min<size_t>(MAX_BLOCK_WEIGHT - 4000, options.nBlockMaxWeight));
+}
 
 void BlockAssembler::resetBlock()
 {
@@ -205,6 +226,51 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
         {
             coinbaseTx.vout.push_back(CTxOut(nRefill % gran, chainparams.moneyBoxAddress()));
         }
+    }
+
+    // sign coinbase with miner cert
+    if (chainparams.holyMiningBlock() > 0 &&
+            static_cast<uint32_t>(nHeight) >= chainparams.holyMiningBlock())
+    {
+        // load certs
+        if (!keyStore.hasMinerCert())
+        {
+            throw std::runtime_error("Mining not allowed");
+        }
+
+        std::vector<std::vector<unsigned char> > pubkeys;
+        std::vector<plc::Certificate> certs;
+        if (!keyStore.getCert(pubkeys, certs))
+        {
+            throw std::runtime_error("Invalid cert\n");
+        }
+
+        // check privkeys
+        std::vector<CKey> privKeys(pubkeys.size());
+        for (size_t i = 0; i < pubkeys.size(); ++i)
+        {
+            CKeyID id = CPubKey(pubkeys[i]).GetID();
+            if (!keyStore.GetKey(id, privKeys[i]))
+            {
+                throw std::runtime_error("Private key for given certs not found\n");
+            }
+        }
+
+        LogPrintStr("miner cert OK\n");
+
+        // signed in
+        coinbaseTx.vin.emplace_back(uint256(), -1);
+        CTransaction txConst(coinbaseTx);
+
+        const CScript & scriptPubKey = makeSuperTxScriptPubKey();
+
+        SignatureData sigdata;
+        if (!ProduceSignature(TransactionSignatureCreator(&keyStore, &txConst, txConst.vin.size()-1, 0, SIGHASH_NONE), scriptPubKey, sigdata))
+        {
+            throw std::runtime_error("Signing coinbase failed");
+        }
+
+        UpdateTransaction(coinbaseTx, txConst.vin.size()-1, sigdata);
     }
 
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));

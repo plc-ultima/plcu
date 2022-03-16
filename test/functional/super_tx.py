@@ -85,7 +85,7 @@ class SuperTxTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.setup_clean_chain = False
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1']] * 2
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=1000']] * 2
         self.outpoints = []
         self.taxfree_cert_filename = None
 
@@ -102,7 +102,7 @@ class SuperTxTest(BitcoinTestFramework):
         self.test_node.sync_with_ping()
 
 
-    def check_scen_001(self, amount, super_key=None, mine_block=True, accepted=True, reject_reason=None):
+    def check_scen_001(self, amount, super_key=None, certs=[], mine_block=True, accepted=True, reject_reason=None):
         node0 = self.nodes[0]
         node1 = self.nodes[1]
         dest_key = create_key()
@@ -117,12 +117,18 @@ class SuperTxTest(BitcoinTestFramework):
         balance_before = node0.getbalance('', 0)
         n = find_output(node0, txid, amount)
         raw_super = node0.createrawtransaction([{'txid': txid, 'vout': n}, null_input], {AddressFromPubkey(dest_key.get_pubkey()): amount - fee})
-        if super_key:
-            sig_res = node0.signrawtransaction(raw_super, [], [SecretBytesToBase58(super_key.get_secret()), node0.dumpprivkey(addr1)])
-        else:
-            sig_res = node0.signrawtransaction(raw_super)
-        self.log.debug(f'check_scen_001, sig_res: {sig_res}')
-        assert_equal(sig_res['complete'], accepted)
+        sig_res = None
+        try:
+            if super_key:
+                sig_res = node0.signrawtransaction(raw_super, [],
+                                                   [SecretBytesToBase58(super_key.get_secret()), node0.dumpprivkey(addr1)],
+                                                   'ALL', certs, [bytes_to_hex_str(super_key.get_pubkey())])
+            else:
+                sig_res = node0.signrawtransaction(raw_super)
+        except JSONRPCException as e:
+            self.log.debug(f'signrawtransaction JSONRPCException: {e}')
+        self.log.debug(f'check_scen_001, amount: {amount}, super_key: {super_key}, mine_block: {mine_block}, sig_res: {sig_res}')
+        assert_equal(sig_res is not None and sig_res['complete'], accepted)
         if accepted:
             assert('errors' not in sig_res or len(sig_res['errors']) == 0)
             txid_super = node0.sendrawtransaction(sig_res['hex'])
@@ -133,8 +139,9 @@ class SuperTxTest(BitcoinTestFramework):
                 self.sync_all()
                 node1.generate(1)
         else:
-            assert_greater_than(len(sig_res['errors']), 0)
-            assert_raises_rpc_error(None, reject_reason, node0.sendrawtransaction, sig_res['hex'])
+            if sig_res:
+                assert_greater_than(len(sig_res['errors']), 0)
+                assert_raises_rpc_error(None, reject_reason, node0.sendrawtransaction, sig_res['hex'])
             balance_after = node0.getbalance('', 0)
             assert_equal(balance_before, balance_after)
         self.sync_all()
@@ -258,40 +265,19 @@ class SuperTxTest(BitcoinTestFramework):
         return (txid, fee + burn_got_sum)
 
 
-    def restart_node_0(self, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None):
+    def restart_node_0(self, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None, accepted=True):
         node0 = self.nodes[0]
         node1 = self.nodes[1]
         self.sync_all()
-
         if use_cert:
-            with open(self.taxfree_cert_filename, 'w', encoding='utf8') as f:
-                body = \
-                    '{\n' \
-                    '    "pubkeys":\n' \
-                    '    [\n' \
-                    '        "%s"\n' \
-                    '    ],\n' \
-                    '    "certs":\n' \
-                    '    [\n' \
-                    '        {\n' \
-                    '            "txid": "%s",\n' \
-                    '            "vout": 0\n' \
-                    '        },\n' \
-                    '        {\n' \
-                    '            "txid": "%s",\n' \
-                    '            "vout": 0\n' \
-                    '        }\n' \
-                    '    ]\n' \
-                    '}\n' % (bytes_to_hex_str(super_key_pubkey), root_cert_hash, pass_cert_hash)
-                f.write(body)
-
+            write_taxfree_cert_to_file(self.taxfree_cert_filename, super_key_pubkey, root_cert_hash, pass_cert_hash)
         self.stop_node(0)
         more_args = [f'-taxfreecert={self.taxfree_cert_filename}'] if use_cert else []
         self.start_node(0, extra_args=self.extra_args[0] + more_args)
         connect_nodes(self.nodes[0], 1)
-        if use_cert:
+        if use_cert and accepted:
             assert_equal(node0.getwalletinfo()['taxfree_certificate'], self.taxfree_cert_filename)
-        else:
+        elif not use_cert:
             assert_not_in('taxfree_certificate', node0.getwalletinfo())
         node1.generate(1)
         self.sync_all()
@@ -309,39 +295,23 @@ class SuperTxTest(BitcoinTestFramework):
         assert_not_in('taxfree_certificate', node0.getwalletinfo())
         assert_not_in('taxfree_certificate', node1.getwalletinfo())
 
-        # Root cert:
-        root_cert_key = root_cert_key if root_cert_key else create_key(True, GENESIS_PRIV_KEY0_BIN)
-        root_cert_name = 'root_cert'
-        root_cert_flags = root_cert_flags if root_cert_flags is not None else 0
-        print_key_verbose(root_cert_key, f'root_cert_key in {root_cert_name}')
-        (self.outpoints, _) = generate_outpoints(node1, 1, Decimal('1.03') + fee, AddressFromPubkey(root_cert_key.get_pubkey()))
-        (tx2, pass_cert_key1) = compose_cert_tx(self.outpoints.pop(0), Decimal(1), root_cert_key, root_cert_name,
-                                                root_cert_flags, block1_hash=root_cert_sig_hash, block2a=root_cert_signature,
-                                                parent_key_for_block2=root_cert_sig_key)
-        root_cert_hash = root_cert_hash if root_cert_hash else send_tx(node1, self.test_node, tx2, True)
-        if root_cert_revoked:
-            prev_scriptpubkey = CScript(hex_str_to_bytes(node1.getrawtransaction(root_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
-            (tx2a, _) = compose_cert_tx(COutPoint(int(root_cert_hash, 16), 0), Decimal('0.9'), root_cert_key,
-                                        root_cert_name, root_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
-            send_tx(node1, self.test_node, tx2a, True)
-        node1.generate(1)
-        self.sync_all()
-
-        # CA3 cert:
-        pass_cert_key = pass_cert_key if pass_cert_key else pass_cert_key1
-        pass_cert_name = 'pass_cert'
-        pass_cert_flags = pass_cert_flags if pass_cert_flags is not None else SUPER_TX
-        (self.outpoints, _) = generate_outpoints(node1, 1, Decimal('1.03') + fee, AddressFromPubkey(pass_cert_key.get_pubkey()))
-        (tx2, super_key1) = compose_cert_tx(self.outpoints.pop(0), Decimal(1), pass_cert_key, pass_cert_name,
-                                            pass_cert_flags, block1_hash=pass_cert_sig_hash, block2a=pass_cert_signature,
-                                            parent_key_for_block2=pass_cert_sig_key)
-        pass_cert_hash = pass_cert_hash if pass_cert_hash else send_tx(node1, self.test_node, tx2, True)
-        super_key = super_key if super_key else super_key1
-        if pass_cert_revoked:
-            prev_scriptpubkey = CScript(hex_str_to_bytes(node1.getrawtransaction(pass_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
-            (tx2a, _) = compose_cert_tx(COutPoint(int(pass_cert_hash, 16), 0), Decimal('0.9'), pass_cert_key,
-                                        pass_cert_name, pass_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
-            send_tx(node1, self.test_node, tx2a, True)
+        (root_cert_hash, pass_cert_hash, super_key) = generate_certs_pair(node1, self.test_node,
+                                                                          root_cert_key=root_cert_key,
+                                                                          root_cert_flags=root_cert_flags,
+                                                                          root_cert_hash=root_cert_hash,
+                                                                          root_cert_sig_hash=root_cert_sig_hash,
+                                                                          root_cert_sig_key=root_cert_sig_key,
+                                                                          root_cert_signature=root_cert_signature,
+                                                                          root_cert_revoked=root_cert_revoked,
+                                                                          pass_cert_key=pass_cert_key,
+                                                                          pass_cert_flags=pass_cert_flags,
+                                                                          pass_cert_hash=pass_cert_hash,
+                                                                          pass_cert_sig_hash=pass_cert_sig_hash,
+                                                                          pass_cert_sig_key=pass_cert_sig_key,
+                                                                          pass_cert_signature=pass_cert_signature,
+                                                                          pass_cert_revoked=pass_cert_revoked,
+                                                                          super_key=super_key, fee=fee,
+                                                                          pass_cert_flag_default=SUPER_TX)
         node1.generate(1)
         self.sync_all()
 
@@ -358,19 +328,23 @@ class SuperTxTest(BitcoinTestFramework):
                                COutPoint(int(pass_cert_hash, 16), 0), super_key, {dest_pkh: amount - fee})
         send_tx(node1, self.test_node, tx3, accepted, reject_reason_p2p)
 
-        self.restart_node_0(True, super_key.get_pubkey(), root_cert_hash, pass_cert_hash)
+        self.restart_node_0(True, super_key.get_pubkey(), root_cert_hash, pass_cert_hash, accepted)
 
         # createrawtransaction --> signrawtransaction(super_key) --> sendrawtransaction
         # with and without mining transactions into blocks
+        certs = [
+            {'txid': root_cert_hash, 'vout': 0},
+            {'txid': pass_cert_hash, 'vout': 0},
+        ]
         for mine_block in [True, False, False]:
-            self.check_scen_001(amount, super_key, mine_block, accepted, reject_reason_rpc)
+            self.check_scen_001(amount, super_key, certs, mine_block, accepted, reject_reason_rpc)
 
         node0.importprivkey(SecretBytesToBase58(super_key.get_secret()))
 
         # createrawtransaction --> signrawtransaction(empty_keys_array) --> sendrawtransaction
         # with and without mining transactions into blocks
         for mine_block in [True, False, False]:
-            self.check_scen_001(amount, None, mine_block, accepted, reject_reason_rpc)
+            self.check_scen_001(amount, None, [], mine_block, accepted, reject_reason_rpc)
 
         self.sync_all()
         node1.generate(1)
@@ -450,6 +424,14 @@ class SuperTxTest(BitcoinTestFramework):
         self.run_scenario('base_positive_2', amount=Decimal(8))
         self.run_scenario('base_positive_3', amount=Decimal('1.12345678'))
 
+        self.run_scenario('positive_supertx_flag_in_root_cert_v1',
+                          root_cert_flags=SUPER_TX,
+                          pass_cert_flags=0)
+
+        self.run_scenario('positive_supertx_flag_in_root_cert_v2',
+                          root_cert_flags=SUPER_TX,
+                          pass_cert_flags=SILVER_HOOF | ALLOW_MINING)
+
         self.run_scenario('missing_root_cert',
                           root_cert_hash=bytes_to_hex_str(hash256(b'xyu')),
                           accepted=False,
@@ -495,11 +477,17 @@ class SuperTxTest(BitcoinTestFramework):
                           reject_reason_p2p=BAD_CERTIFICATE,
                           reject_reason_rpc=BAD_BURNED)
 
-        self.run_scenario('no_supertx_flag_in_cert',
+        self.run_scenario('no_supertx_flag_in_cert_v1',
                           pass_cert_flags=0,
                           accepted=False,
                           reject_reason_p2p=BAD_CERTIFICATE,
-                          reject_reason_rpc=BAD_BURNED)
+                          reject_reason_rpc=[BAD_BURNED, BAD_CERTIFICATE])
+
+        self.run_scenario('no_supertx_flag_in_cert_v2',
+                          pass_cert_flags=SILVER_HOOF | ALLOW_MINING,
+                          accepted=False,
+                          reject_reason_p2p=BAD_CERTIFICATE,
+                          reject_reason_rpc=[BAD_BURNED, BAD_CERTIFICATE])
 
         self.run_scenario('root_cert_revoked',
                           root_cert_revoked=True,

@@ -292,17 +292,14 @@ class GraveTest(BitcoinTestFramework):
         node0.sendmany('', {GRAVE_ADDRESS_1: burn1})
         node0.sendmany('', {GRAVE_ADDRESS_2: burn2})
         node0.sendmany('', {GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
-        node0.sendmany('', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_1: burn1})
-        node0.sendmany('',{node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_2: burn2})
-        node0.sendmany('', {node0.getnewaddress(): 1, node0.getnewaddress(): 2, node0.getnewaddress(): 3, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
         node0.sendtoaddress(GRAVE_ADDRESS_1, burn1)
         node0.sendtoaddress(GRAVE_ADDRESS_2, burn2)
 
         # Generate utxos:
         (self.my_key1, self.my_pubkey1, self.my_pkh1, self.my_p2pkh_scriptpubkey1, self.my_p2pk_scriptpubkey1) = create_my_key()
-        (burn1, burn2, change) = BurnedAndChangeAmount(amount - fee)
+        (burn1, burn2, change) = BurnedAndChangeAmount(amount - fee, keep_sum=False)
         self.log.debug(f'amount: {amount}, fee: {fee}, burn1: {burn1}, burn2: {burn2}, change: {change}')
-        for i in range(50):
+        for i in range(20):
             txid = node0.sendtoaddress(AddressFromPubkeyHash(self.my_pkh1), amount)
             self.outpoints.append(COutPoint(int(txid, 16), find_output(node0, txid, amount)))
         self.nodes[0].generate(1)
@@ -333,15 +330,15 @@ class GraveTest(BitcoinTestFramework):
         vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         self.compose_and_send_tx(vout, True)
 
-        # A005: Send coins only to burn1 address, without target address: ???
-        # vout = []
-        # vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
-        # self.compose_and_send_tx(vout, True)
-        #
-        # A006: Send coins only to burn2 address, without target address: ???
-        # vout = []
-        # vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
-        # self.compose_and_send_tx(vout, True)
+        # A005: Send coins only to burn1 address, without target address: accepted
+        vout = []
+        vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+        self.compose_and_send_tx(vout, True)
+
+        # A006: Send coins only to burn2 address, without target address: accepted
+        vout = []
+        vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
+        self.compose_and_send_tx(vout, True)
 
         # A007: Tx to addr1 without burn: rejected
         vout = []
@@ -417,7 +414,7 @@ class GraveTest(BitcoinTestFramework):
         signature = self.my_key1.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
         tx1.vin[0].scriptSig = CScript([signature])
         tx1.rehash()
-        send_tx(node0, self.test_node, tx1, False, 'bad-burned')
+        send_tx(node0, self.test_node, tx1, False, 'bad-burned', False)
 
         # A018: Tx to self (p2pk --> p2pk), burn is not needed: accepted
         tx1 = CTransaction()
@@ -429,6 +426,13 @@ class GraveTest(BitcoinTestFramework):
         tx1.vin[0].scriptSig = CScript([signature])
         tx1.rehash()
         send_tx(node0, self.test_node, tx1, True)
+
+        # A019: Burn1 to self instead of burn1 address, burn2 ok: rejected
+        vout = []
+        vout.append(CTxOut(ToSatoshi(change), GetP2PKHScript(pkh1)))
+        vout.append(CTxOut(ToSatoshi(burn1), self.my_p2pkh_scriptpubkey1))
+        vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
+        self.compose_and_send_tx(vout, False)
 
 
 if __name__ == '__main__':

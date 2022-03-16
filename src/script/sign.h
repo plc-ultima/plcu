@@ -73,10 +73,6 @@ struct SignatureData {
     explicit SignatureData(const CScript& script) : scriptSig(script) {}
 };
 
-bool loadTaxFreeCert(std::vector<std::vector<unsigned char> > & pubkeys,
-                     std::vector<plc::Certificate> & certs,
-                     std::string & fileName);
-
 /** Produce a script signature using a generic signature creator. */
 bool ProduceSignature(const BaseSignatureCreator& creator, const CScript& scriptPubKey, SignatureData& sigdata);
 

@@ -21,7 +21,7 @@ protected:
     mutable CCriticalSection cs_KeyStore;
 
 public:
-    virtual ~CKeyStore() {}
+    virtual ~CKeyStore();
 
     //! Add a key to the store.
     virtual bool AddKeyPubKey(const CKey &key, const CPubKey &pubkey) =0;
@@ -43,6 +43,13 @@ public:
     virtual bool RemoveWatchOnly(const CScript &dest) =0;
     virtual bool HaveWatchOnly(const CScript &dest) const =0;
     virtual bool HaveWatchOnly() const =0;
+
+    virtual bool hasTaxFreeCert() const = 0;
+    virtual bool hasMinerCert() const = 0;
+    virtual bool getCert(std::vector<std::vector<unsigned char> > & pubkeys,
+                         std::vector<plc::Certificate> & certs) const = 0;
+    virtual bool setCert(const std::vector<std::vector<unsigned char> > & pubkeys,
+                         const std::vector<plc::Certificate> & certs) = 0;
 };
 
 typedef std::map<CKeyID, CKey> KeyMap;
@@ -58,6 +65,11 @@ protected:
     WatchKeyMap mapWatchKeys;
     ScriptMap mapScripts;
     WatchOnlySet setWatchOnly;
+
+    // taxfree cert
+    std::vector<std::vector<unsigned char> > m_taxfreePubkeys;
+    plc::CertParameters                      m_taxFreeParams;
+    std::vector<plc::Certificate>            m_taxfreeCerts;
 
 public:
     bool AddKeyPubKey(const CKey& key, const CPubKey &pubkey) override;
@@ -105,6 +117,13 @@ public:
     virtual bool RemoveWatchOnly(const CScript &dest) override;
     virtual bool HaveWatchOnly(const CScript &dest) const override;
     virtual bool HaveWatchOnly() const override;
+
+    virtual bool hasTaxFreeCert() const override;
+    virtual bool hasMinerCert() const override;
+    virtual bool getCert(std::vector<std::vector<unsigned char> > & pubkeys,
+                         std::vector<plc::Certificate> & certs) const override;
+    virtual bool setCert(const std::vector<std::vector<unsigned char> > & pubkeys,
+                         const std::vector<plc::Certificate> & certs) override;
 };
 
 typedef std::vector<unsigned char, secure_allocator<unsigned char> > CKeyingMaterial;

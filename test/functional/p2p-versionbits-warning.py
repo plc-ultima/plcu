@@ -37,7 +37,7 @@ class VersionBitsWarningTest(BitcoinTestFramework):
         # Open and close to create zero-length file
         with open(self.alert_filename, 'w', encoding='utf8') as _:
             pass
-        self.extra_args = [["-alertnotify=echo %s >> \"" + self.alert_filename + "\""]]
+        self.extra_args = [["-alertnotify=echo %s >> \"" + self.alert_filename + "\"", '-holyminingblock-regtest=1000']]
         self.setup_nodes()
 
     # Send numblocks blocks via peer with nVersionToUse set.

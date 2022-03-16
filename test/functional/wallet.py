@@ -86,10 +86,15 @@ class WalletTest(BitcoinTestFramework):
         assert txout is None
         # new utxo from mempool should be invisible if you exclude mempool
         # but visible if you include mempool
-        txout = self.nodes[0].gettxout(mempool_txid, 0, False)
+        output_indexes = [0, 1, 2, 3]
+        burn1_index = find_output_by_address(self.nodes[0], GRAVE_ADDRESS_1, mempool_txid)
+        burn2_index = find_output_by_address(self.nodes[0], GRAVE_ADDRESS_2, mempool_txid)
+        output_indexes.remove(burn1_index)
+        output_indexes.remove(burn2_index)
+        txout = self.nodes[0].gettxout(mempool_txid, output_indexes[0], False)
         assert txout is None
-        txout1 = self.nodes[0].gettxout(mempool_txid, 0, True)
-        txout2 = self.nodes[0].gettxout(mempool_txid, 1, True)
+        txout1 = self.nodes[0].gettxout(mempool_txid, output_indexes[0], True)
+        txout2 = self.nodes[0].gettxout(mempool_txid, output_indexes[1], True)
         # note the mempool tx will have randomly assigned indices
         # but 10 will go to node2 and the rest will go to node0
         balance = self.nodes[0].getbalance()
@@ -409,7 +414,13 @@ class WalletTest(BitcoinTestFramework):
         self.nodes[0].generate(1)
         node0_balance = self.nodes[0].getbalance()
         # Split into two chains
-        rawtx = self.nodes[0].createrawtransaction([{"txid":singletxid, "vout":0}], {chain_addrs[0]:node0_balance/2-Decimal('0.01'), chain_addrs[1]:node0_balance/2-Decimal('0.01')})
+        (burn1, burn2, rest) = BurnedAndChangeAmount(node0_balance)
+        rawtx = self.nodes[0].createrawtransaction([{"txid": singletxid, "vout": 0}], {
+            chain_addrs[0]: rest / 2 - Decimal('0.01'),
+            chain_addrs[1]: rest / 2 - Decimal('0.01'),
+            GRAVE_ADDRESS_1: burn1,
+            GRAVE_ADDRESS_2: burn2,
+        })
         signedtx = self.nodes[0].signrawtransaction(rawtx)
         singletxid = self.nodes[0].sendrawtransaction(signedtx["hex"])
         self.nodes[0].generate(1)
@@ -447,7 +458,7 @@ class WalletTest(BitcoinTestFramework):
 
         node0_balance = self.nodes[0].getbalance()
         # With walletrejectlongchains we will not create the tx and store it in our wallet.
-        assert_raises_rpc_error(-4, "Transaction has too long of a mempool chain", self.nodes[0].sendtoaddress, sending_addr, node0_balance - Decimal('0.01'))
+        assert_raises_rpc_error(-4, "Transaction has too long of a mempool chain", self.nodes[0].sendtoaddress, sending_addr, node0_balance, '', '', True)
 
         # Verify nothing new in wallet
         assert_equal(total_txs, len(self.nodes[0].listtransactions("*",99999)))

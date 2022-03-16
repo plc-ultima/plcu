@@ -29,6 +29,7 @@
 #include "reverse_iterator.h"
 #include "script/script.h"
 #include "script/sigcache.h"
+#include "script/sign.h"
 #include "script/standard.h"
 #include "timedata.h"
 #include "tinyformat.h"
@@ -2010,6 +2011,107 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
 }
 
 
+bool checkInputCorrectlySigned(const CTxIn & in,
+                               const BaseSignatureChecker & checker)
+{
+    // [<sig><pub>]<txid><n><txid><n><OP_CHECKSUPER>
+
+    CScript::Ops ops;
+    if (!in.scriptSig.parse(ops))
+    {
+        return false;
+    }
+
+    if (ops.size() < 7)
+    {
+        return false;
+    }
+
+    std::vector<std::vector<unsigned char> > signatures;
+    std::vector<std::vector<unsigned char> > pubkeys;
+
+    uint32_t i = 0;
+    for (; i < ops.size() - 5; i += 2)
+    {
+        if (!CheckSignatureEncoding(ops[i].second, SCRIPT_VERIFY_STRICTENC, nullptr) ||
+            !CheckPubKeyEncoding(ops[i+1].second, SCRIPT_VERIFY_STRICTENC, SIGVERSION_BASE, nullptr))
+        {
+            break;
+        }
+
+        signatures.emplace_back(ops[i].second);
+        pubkeys.emplace_back(ops[i+1].second);
+    }
+
+    if (signatures.size() == 0 ||pubkeys.size() == 0)
+    {
+        return false;
+    }
+
+    std::vector<plc::Certificate> certs;
+    for (; i < ops.size() - 1; i += 2)
+    {
+        if (ops[i].second.size() != sizeof(uint256) ||
+            ops[i +1].second.size() > sizeof(uint32_t))
+        {
+            return false;
+        }
+
+        certs.emplace_back(uint256(ops[i].second), CScriptNum(ops[i + 1].second, true).get<uint32_t>());
+    }
+
+    if (ops[i].second.size() != 1 || ops[i].second[0] != OP_CHECKSUPER)
+    {
+        return false;
+    }
+
+    plc::Validator v;
+
+    plc::CertParameters params;
+    if (!v.validateChainOfCerts(certs, pubkeys, params))
+    {
+        return false;
+    }
+
+    if ((params.flags & plc::holyShovel) == 0)
+    {
+        return false;
+    }
+
+    if (!v.verifyCertSignatures(signatures, pubkeys, params,
+                                CScript(ops[i].second.begin(), ops[i].second.end()), checker))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool checkTxCorrectlySigned(const CTransactionRef & tx, CValidationState & state)
+{
+    bool isFound = false;
+    for (uint32_t i = 0; i < tx->vin.size(); ++i)
+    {
+        const CTxIn & in = tx->vin[i];
+
+        TransactionSignatureChecker checker(tx.get(), i, 0);
+
+        if (checkInputCorrectlySigned(in, checker))
+        {
+            isFound = true;
+            break;
+        }
+    }
+
+    if (!isFound)
+    {
+        return state.DoS(100,
+                         error("ConnectBlock(): digger without shovel"),
+                               REJECT_INVALID, "bad-cb-cert");
+    }
+
+    return true;
+}
 
 static int64_t nTimeCheck = 0;
 static int64_t nTimeForks = 0;
@@ -2215,6 +2317,18 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     CAmount foundSubsidy = 0;
     CAmount foundAward   = 0;
     int     countOfAward = 0;
+
+    // check miner
+    if (chainparams.holyMiningBlock() > 0 &&
+            static_cast<uint32_t>(pindex->nHeight) >= chainparams.holyMiningBlock())
+    {
+        if (!checkTxCorrectlySigned(block.vtx[0], state))
+        {
+            return state.DoS(100,
+                             error("ConnectBlock(): digger without shovel"),
+                                   REJECT_INVALID, "bad-cb-cert");
+        }
+    }
 
     for (const CTxOut & out : block.vtx[0]->vout)
     {
@@ -2620,11 +2734,11 @@ private:
 
 public:
     ConnectTrace(CTxMemPool &_pool) : blocksConnected(1), pool(_pool) {
-        pool.NotifyEntryRemoved.connect(boost::bind(&ConnectTrace::NotifyEntryRemoved, this, _1, _2));
+        pool.NotifyEntryRemoved.connect(boost::bind(&ConnectTrace::NotifyEntryRemoved, this, boost::placeholders::_1, boost::placeholders::_2));
     }
 
     ~ConnectTrace() {
-        pool.NotifyEntryRemoved.disconnect(boost::bind(&ConnectTrace::NotifyEntryRemoved, this, _1, _2));
+        pool.NotifyEntryRemoved.disconnect(boost::bind(&ConnectTrace::NotifyEntryRemoved, this, boost::placeholders::_1, boost::placeholders::_2));
     }
 
     void BlockConnected(CBlockIndex* pindex, std::shared_ptr<const CBlock> pblock) {

@@ -4,7 +4,7 @@
 
 #include "test/test_bitcoin.h"
 #include "utilstrencodings.h"
-#include "wallet/crypter.h"
+#include "crypto/crypter.h"
 
 #include <vector>
 

@@ -6,6 +6,7 @@
 #ifndef BITCOIN_MINER_H
 #define BITCOIN_MINER_H
 
+#include "keystore.h"
 #include "primitives/block.h"
 #include "txmempool.h"
 
@@ -154,6 +155,7 @@ private:
     int nHeight;
     int64_t nLockTimeCutoff;
     const CChainParams& chainparams;
+    const CKeyStore & keyStore;
 
 public:
     struct Options {
@@ -163,8 +165,14 @@ public:
         CFeeRate blockMinFeeRate;
     };
 
-    BlockAssembler(const CChainParams& params);
-    BlockAssembler(const CChainParams& params, const Options& options);
+    BlockAssembler(const CChainParams & params);
+    BlockAssembler(const CChainParams & params,
+                   const Options      & options);
+    BlockAssembler(const CKeyStore    & keystore,
+                   const CChainParams & params);
+    BlockAssembler(const CKeyStore    & keystore,
+                   const CChainParams & params,
+                   const Options      & options);
 
 
     /** Construct a new block template with coinbase and fee to subsidyPubKeyIn */

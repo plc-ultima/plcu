@@ -6,8 +6,13 @@
 #include "keystore.h"
 
 #include "key.h"
+#include "plcvalidator.h"
 #include "pubkey.h"
 #include "util.h"
+
+CKeyStore::~CKeyStore() 
+{
+}
 
 bool CKeyStore::AddKey(const CKey &key) {
     return AddKeyPubKey(key, key.GetPubKey());
@@ -110,4 +115,50 @@ bool CBasicKeyStore::HaveWatchOnly() const
 {
     LOCK(cs_KeyStore);
     return (!setWatchOnly.empty());
+}
+
+//******************************************************************************
+//******************************************************************************
+bool CBasicKeyStore::hasTaxFreeCert() const
+{
+    return (m_taxFreeParams.flags & plc::shadowEmperor) == plc::shadowEmperor;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool CBasicKeyStore::hasMinerCert() const
+{
+    return (m_taxFreeParams.flags & plc::holyShovel) == plc::holyShovel;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool CBasicKeyStore::getCert(std::vector<std::vector<unsigned char> > & pubkeys,
+                             std::vector<plc::Certificate> & certs) const
+{
+    if (m_taxfreePubkeys.empty() || m_taxfreeCerts.empty())
+    {
+        // not loaded
+        return false;
+    }
+
+    pubkeys = m_taxfreePubkeys;
+    certs   = m_taxfreeCerts;
+    return true;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool CBasicKeyStore::setCert(const std::vector<std::vector<unsigned char> > & pubkeys,
+                             const std::vector<plc::Certificate> & certs)
+{
+    plc::CertParameters params;
+    if (!plc::Validator().validateChainOfCerts(certs, pubkeys, params))
+    {
+        return false;
+    }
+    m_taxfreePubkeys = pubkeys;
+    m_taxfreeCerts   = certs;
+    m_taxFreeParams  = params;
+    return true;
 }

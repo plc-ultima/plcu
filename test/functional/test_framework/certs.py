@@ -25,7 +25,8 @@ HAS_OTHER_DATA         = 0x00000800
 FAST_MINTING           = 0x00010000
 FREE_BEN               = 0x00020000
 SILVER_HOOF            = 0x00040000
-SUPER_TX               = 0x00080000
+SUPER_TX               = 0x00080000  # shadowEmperor in cpp
+ALLOW_MINING           = 0x00100000  # holyShovel in cpp
 TOTAL_PUBKEYS_COUNT_MASK     = 0x0000f000
 REQUIRED_PUBKEYS_COUNT_MASK  = 0xf0000000
 
@@ -121,6 +122,25 @@ def send_tx(node, test_node, tx, accepted, reject_reason=None, try_mine_in_block
         assert_equal(bestblockhash_before, node.getbestblockhash())
         process_reject_message(test_node, reject_reason, accepted)
     return tx.hash if accepted else None
+
+
+def send_block(node, test_node, block, accepted, reject_reason = None):
+    bestblockhash_before = node.getbestblockhash()
+    assert_equal(int(bestblockhash_before, 16), block.hashPrevBlock)
+    block_message = msg_block(block)
+    logger.debug('Sending block {}: {}'.format(block.hash, bytes_to_hex_str(block_message.serialize())))
+    test_node.send_message(block_message)
+    test_node.sync_with_ping()
+    assert_equal(bestblockhash_before == node.getbestblockhash(), not accepted)
+    assert_equal(block.hash == node.getbestblockhash(), accepted)
+
+    if accepted and test_node.reject_message is not None:
+        logger.error(f'got reject message: {test_node.reject_message}')
+    if not accepted and reject_reason:
+        assert_equal(test_node.reject_message.reason.decode('ascii'), reject_reason)
+    test_node.reject_message = None
+
+    return block.hash if accepted else None
 
 
 def generate_outpoints(node, count, amount, address):
@@ -221,3 +241,86 @@ def compose_mint_tx(user_utxos, moneybox_utxos, utxo_cert_root, utxo_cert_ca3, u
     return (tx3, reward_payed)
 
 
+def write_taxfree_cert_to_file(filename, super_key_pubkey, root_cert_hash, pass_cert_hash):
+    with open(filename, 'w', encoding='utf8') as f:
+        body = \
+            '{\n' \
+            '    "pubkeys":\n' \
+            '    [\n' \
+            '        "%s"\n' \
+            '    ],\n' \
+            '    "certs":\n' \
+            '    [\n' \
+            '        {\n' \
+            '            "txid": "%s",\n' \
+            '            "vout": 0\n' \
+            '        },\n' \
+            '        {\n' \
+            '            "txid": "%s",\n' \
+            '            "vout": 0\n' \
+            '        }\n' \
+            '    ]\n' \
+            '}\n' % (bytes_to_hex_str(super_key_pubkey), root_cert_hash, pass_cert_hash)
+        f.write(body)
+
+
+def add_cert_to_coinbase(coinbase, utxo_cert_root, utxo_cert_ca3, user_super_key):
+    coinbase.vin.append(CTxIn(COutPoint(0,0xffffffff), GetP2SHMoneyboxScript(OP_CHECKSUPER), 0xffffffff))
+    for i in range(len(coinbase.vin) - 1, len(coinbase.vin)):
+        # There are no common rules of composing signature for p2sh transaction inputs,
+        # we made agreement to replace scriptSig with inner script (CScript(OP_CHECKSUPER)), not
+        # with the public key script of the referenced transaction output
+        # (excluding all occurences of OP CODESEPARATOR in it), as for p2pkh transactions:
+        scriptSig = CScript([OP_CHECKSUPER])
+        (sig_hash, err) = SignatureHash(scriptSig, coinbase, i, SIGHASH_ALL)
+        assert (err is None)
+        signatures_and_keys = []
+        signature = user_super_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        signatures_and_keys.append(signature)
+        signatures_and_keys.append(user_super_key.get_pubkey())
+        coinbase.vin[i].scriptSig = CScript(signatures_and_keys +
+                                            [ser_uint256(utxo_cert_root.hash), utxo_cert_root.n,
+                                             ser_uint256(utxo_cert_ca3.hash), utxo_cert_ca3.n,
+                                             CScript([OP_CHECKSUPER])])
+    coinbase.rehash()
+    return coinbase
+
+
+def generate_certs_pair(node, test_node, root_cert_key=None, root_cert_flags=None, root_cert_hash=None,
+                        root_cert_sig_hash=None, root_cert_sig_key=None, root_cert_signature=None,
+                        root_cert_revoked=False, pass_cert_key=None, pass_cert_flags=None, pass_cert_hash=None,
+                        pass_cert_sig_hash=None, pass_cert_sig_key=None, pass_cert_signature=None,
+                        pass_cert_revoked=False, super_key=None, fee=Decimal('0.00001'), pass_cert_flag_default=0):
+    # Root cert:
+    root_cert_key = root_cert_key if root_cert_key else create_key(True, GENESIS_PRIV_KEY0_BIN)
+    root_cert_name = 'root_cert'
+    root_cert_flags = root_cert_flags if root_cert_flags is not None else 0
+    # print_key_verbose(root_cert_key, f'root_cert_key in {root_cert_name}')
+    (outpoints, _) = generate_outpoints(node, 1, Decimal('1.03') + fee, AddressFromPubkey(root_cert_key.get_pubkey()))
+    (tx2, pass_cert_key1) = compose_cert_tx(outpoints.pop(0), Decimal(1), root_cert_key, root_cert_name,
+                                            root_cert_flags, block1_hash=root_cert_sig_hash, block2a=root_cert_signature,
+                                            parent_key_for_block2=root_cert_sig_key)
+    root_cert_hash = root_cert_hash if root_cert_hash else send_tx(node, test_node, tx2, True)
+    if root_cert_revoked:
+        prev_scriptpubkey = CScript(hex_str_to_bytes(node.getrawtransaction(root_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
+        (tx2a, _) = compose_cert_tx(COutPoint(int(root_cert_hash, 16), 0), Decimal('0.9'), root_cert_key,
+                                    root_cert_name, root_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
+        send_tx(node, test_node, tx2a, True)
+
+    # CA3 cert:
+    pass_cert_key = pass_cert_key if pass_cert_key else pass_cert_key1
+    pass_cert_name = 'pass_cert'
+    pass_cert_flags = pass_cert_flags if pass_cert_flags is not None else pass_cert_flag_default
+    (outpoints, _) = generate_outpoints(node, 1, Decimal('1.03') + fee, AddressFromPubkey(pass_cert_key.get_pubkey()))
+    (tx2, super_key1) = compose_cert_tx(outpoints.pop(0), Decimal(1), pass_cert_key, pass_cert_name,
+                                        pass_cert_flags, block1_hash=pass_cert_sig_hash, block2a=pass_cert_signature,
+                                        parent_key_for_block2=pass_cert_sig_key)
+    pass_cert_hash = pass_cert_hash if pass_cert_hash else send_tx(node, test_node, tx2, True)
+    super_key = super_key if super_key else super_key1
+    if pass_cert_revoked:
+        prev_scriptpubkey = CScript(hex_str_to_bytes(node.getrawtransaction(pass_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
+        (tx2a, _) = compose_cert_tx(COutPoint(int(pass_cert_hash, 16), 0), Decimal('0.9'), pass_cert_key,
+                                    pass_cert_name, pass_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
+        send_tx(node, test_node, tx2a, True)
+
+    return (root_cert_hash, pass_cert_hash, super_key)

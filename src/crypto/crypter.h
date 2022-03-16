@@ -137,6 +137,8 @@ public:
     {
     }
 
+    virtual ~CCryptoKeyStore();
+
     bool IsCrypted() const
     {
         return fUseCrypto;

@@ -697,7 +697,7 @@ UniValue signrawtransaction(const JSONRPCRequest& request)
     CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
 #endif
 
-    if (request.fHelp || request.params.size() < 1 || request.params.size() > 4)
+    if (request.fHelp || request.params.size() < 1 || request.params.size() > 6)
         throw std::runtime_error(
             "signrawtransaction \"hexstring\" ( [{\"txid\":\"id\",\"vout\":n,\"scriptPubKey\":\"hex\",\"redeemScript\":\"hex\"},...] [\"privatekey1\",...] sighashtype )\n"
             "\nSign inputs for raw transaction (serialized, hex-encoded).\n"
@@ -734,7 +734,19 @@ UniValue signrawtransaction(const JSONRPCRequest& request)
             "       \"ALL|ANYONECANPAY\"\n"
             "       \"NONE|ANYONECANPAY\"\n"
             "       \"SINGLE|ANYONECANPAY\"\n"
-
+            "5. \"certificate\" (string, optional) A json array of tx ref of certificate\n"
+            "    [              (json array of json objects, or 'null' if none provided)\n"
+            "        {\n"
+            "         \"txid\":\"id\",             (string, required) The transaction id\n"
+            "         \"vout\":n,                  (numeric, required) The output number\n"
+            "       }\n"
+            "       ,...\n"
+            "    ]\n"
+            "6. \"pubkeys\"     (string, optional) A json array of hex-encoded pubkeys\n"
+            "    [              (json array of strings, or 'null' if none provided)\n"
+            "      \"pubkey\"   (string) hex-encoded public key\n"
+            "      ,...\n"
+            "    ]\n"
             "\nResult:\n"
             "{\n"
             "  \"hex\" : \"value\",           (string) The hex-encoded raw transaction with signature(s)\n"
@@ -800,6 +812,66 @@ UniValue signrawtransaction(const JSONRPCRequest& request)
             tempKeystore.AddKey(key);
         }
     }
+
+    if (fGivenKeys)
+    {
+        std::vector<plc::Certificate> certs;
+        if (request.params.size() > 4 && !request.params[4].isNull())
+        {
+            {
+                UniValue v = request.params[4];
+                for (uint32_t i = 0; i < v.size(); ++i)
+                {
+                    const UniValue & val      = v[i].get_obj();
+
+                    UniValue vtxid = find_value(val.get_obj(), "txid");
+                    UniValue vvout = find_value(val.get_obj(), "vout");
+
+                    if (!vtxid.isStr() || !vvout.isNum())
+                    {
+                        throw JSONRPCError(RPC_INTERNAL_ERROR, "bad cert parameters");
+                    }
+
+                    uint256 txid = uint256S(vtxid.get_str());
+                    int     vout = vvout.get_int();
+
+                    if (txid.IsNull())
+                    {
+                        throw JSONRPCError(RPC_INTERNAL_ERROR, "invalid txid in cert parameters");
+                    }
+
+                    certs.emplace_back(txid, vout);
+                }
+            }
+        }
+
+        std::vector<std::vector<unsigned char> > pubkeys;
+        if (request.params.size() > 5 && !request.params[5].isNull())
+        {
+            {
+                UniValue keys = request.params[5].get_array();
+                for (uint32_t i = 0; i < keys.size(); ++i)
+                {
+                    UniValue key = keys[i].get_str();
+                    CPubKey pub(ParseHex(key.get_str()));
+                    if (!pub.IsValid())
+                    {
+                        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "invalid public key <" + key.get_str() + ">");
+                    }
+                    pubkeys.emplace_back(ParseHex(key.get_str()));
+                }
+            }
+        }
+
+        if (!pubkeys.empty() || !certs.empty())
+        {
+            if (!tempKeystore.setCert(pubkeys, certs))
+            {
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "bad cert");
+            }
+        }
+    }
+
 #ifdef ENABLE_WALLET
     else if (pwallet) {
         EnsureWalletIsUnlocked(pwallet);

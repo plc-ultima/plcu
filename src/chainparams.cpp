@@ -162,6 +162,8 @@ public:
         consensus.defaultFeeReductionBlock   = 35000;
         consensus.maxTotalAmount             = 11000000 * COIN;
 
+        consensus.holyMiningBlock            = 0;
+
         /**
          * The message start string is designed to be unlikely to occur in normal data.
          * The characters are rarely used upper ASCII, not valid as UTF-8, and produce
@@ -282,6 +284,8 @@ public:
         consensus.defaultFeeReductionBlock   = 29000;
         consensus.maxTotalAmount             = 5500000 * COIN;
 
+        consensus.holyMiningBlock            = 140000;
+
         pchMessageStart[0] = 0xfc;
         pchMessageStart[1] = 0xd1;
         pchMessageStart[2] = 0xc7;
@@ -397,6 +401,8 @@ public:
         consensus.maxCaBlock                 = 512;
         consensus.defaultFeeReductionBlock   = 2000;
         consensus.maxTotalAmount             = 1100000 * COIN;
+
+        consensus.holyMiningBlock            = 550;
 
         pchMessageStart[0] = 0xef;
         pchMessageStart[1] = 0xbe;
@@ -597,4 +603,16 @@ bool CChainParams::isGrave(const CScript & scriptPubKey) const
         }
     }
     return false;
+}
+
+//******************************************************************************
+//******************************************************************************
+uint32_t CChainParams::holyMiningBlock() const
+{
+    if (NetworkIDString() == CBaseChainParams::REGTEST)
+    {
+        return gArgs.GetArg("-holyminingblock-regtest", consensus.holyMiningBlock);
+    }
+
+    return consensus.holyMiningBlock;
 }

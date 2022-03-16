@@ -42,7 +42,7 @@ class TotalEmissionTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = False
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1']]
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=1000']]
         self.outpoints = []
         self.moneybox_utxo_amounts = {}
 
@@ -59,25 +59,6 @@ class TotalEmissionTest(BitcoinTestFramework):
         self.test_node.sync_with_ping()
 
 
-    def send_block(self, block, accepted, reject_reason = None):
-        bestblockhash_before = self.nodes[0].getbestblockhash()
-        assert_equal(int(bestblockhash_before, 16), block.hashPrevBlock)
-        block_message = msg_block(block)
-        self.log.debug('Sending block {}: {}'.format(block.hash, bytes_to_hex_str(block_message.serialize())))
-        self.test_node.send_message(block_message)
-        self.test_node.sync_with_ping()
-        assert_equal(bestblockhash_before == self.nodes[0].getbestblockhash(), not accepted)
-        assert_equal(block.hash == self.nodes[0].getbestblockhash(), accepted)
-
-        if accepted and self.test_node.reject_message is not None:
-            self.log.error(f'got reject message: {self.test_node.reject_message}')
-        if not accepted and reject_reason:
-            assert_equal(self.test_node.reject_message.reason.decode('ascii'), reject_reason)
-        self.test_node.reject_message = None
-
-        return block.hash if accepted else None
-
-
     def compose_and_send_block(self, coinbase, tx_list, accepted, reject_reason = None):
         coinbase.rehash()
         for tx in tx_list:
@@ -85,7 +66,7 @@ class TotalEmissionTest(BitcoinTestFramework):
         tmpl = self.nodes[0].getblocktemplate()
         block = create_block(int(tmpl['previousblockhash'], 16), coinbase, tmpl['curtime'], int(tmpl['bits'], 16), VB_TOP_BITS, tx_list)
         self.log.debug(f'block: {block}')
-        self.send_block(block, accepted, reject_reason)
+        send_block(self.nodes[0], self.test_node, block, accepted, reject_reason)
 
 
     def parse_moneybox_utxos(self, block_hash, verbose=False):

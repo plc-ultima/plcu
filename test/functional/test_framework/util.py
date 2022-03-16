@@ -135,7 +135,10 @@ def assert_raises_rpc_error(code, message, fun, *args, **kwds):
         args*: positional arguments for the function.
         kwds**: named arguments for the function.
     """
-    assert try_rpc(code, message, fun, *args, **kwds), "No exception raised"
+    if type(code) == list or type(message) == list:
+        assert try_rpc_ex(code, message, fun, *args, **kwds), "No exception raised"
+    else:
+        assert try_rpc(code, message, fun, *args, **kwds), "No exception raised"
 
 def try_rpc(code, message, fun, *args, **kwds):
     """Tries to run an rpc command.
@@ -153,6 +156,33 @@ def try_rpc(code, message, fun, *args, **kwds):
         return True
     except Exception as e:
         raise AssertionError("Unexpected exception raised: " + type(e).__name__)
+    else:
+        return False
+
+def try_rpc_ex(codes, messages, fun, *args, **kwds):
+    """Tries to run an rpc command.
+
+    Test against error codes and messages if the rpc fails.
+    Returns whether a JSONRPCException was raised."""
+    try:
+        fun(*args, **kwds)
+    except JSONRPCException as e:
+        # JSONRPCException was thrown as expected. Check the code and message values are correct.
+        received_code = e.error['code']
+        received_message = e.error['message']
+        if codes and received_code not in codes:
+            raise AssertionError(f'Unexpected JSONRPC error code, got: {received_code}, expected: {codes}')
+        if messages:
+            found = False
+            for message in messages:
+                if not message or message in received_message:
+                    found = True
+                    break
+            if not found:
+                raise AssertionError(f'Expected substring not found, got: {received_message}, expected: {messages}')
+        return True
+    except Exception as e:
+        raise AssertionError('Unexpected exception raised: ' + type(e).__name__)
     else:
         return False
 
@@ -447,12 +477,12 @@ def sync_mempools(rpc_connections, *, wait=1, timeout=60):
 # Transaction/Block functions
 #############################
 
-def find_output(node, txid, amount):
+def find_output(node, txid, amount, tx_json=None):
     """
     Return index to output of txid with value amount
     Raises exception if there is none.
     """
-    txdata = node.getrawtransaction(txid, 1)
+    txdata = tx_json if tx_json else node.getrawtransaction(txid, 1)
     for i in range(len(txdata["vout"])):
         if txdata["vout"][i]["value"] == amount:
             return i
@@ -702,7 +732,7 @@ def find_burned_amount_in_tx(tx):
     return burned
 
 # total_out_amount == input_amount - fee
-def BurnedAndChangeAmount(total_out_amount, dest_amount = 0):
+def BurnedAndChangeAmount(total_out_amount, dest_amount = 0, keep_sum = True):
     if total_out_amount == 0:
         return (0, 0, 0)
     assert_greater_than(total_out_amount, dest_amount)
@@ -714,13 +744,14 @@ def BurnedAndChangeAmount(total_out_amount, dest_amount = 0):
     burn_total = total_out_amount * 3 / 103
     burn1 = ToCoins(burn_total * 2 / 3)
     burn2 = ToCoins(burn_total / 3)
-    if change + burn1 + burn2 < total_out_amount - dest_amount and change == 0:
-        change += Decimal('0.00000001')
-    if change + burn1 + burn2 < total_out_amount - dest_amount:
-        burn1 += Decimal('0.00000001')
-    if change + burn1 + burn2 < total_out_amount - dest_amount:
-        burn2 += Decimal('0.00000001')
-    assert_equal(change + burn1 + burn2, total_out_amount - dest_amount)
+    if keep_sum:
+        if change + burn1 + burn2 < total_out_amount - dest_amount and change == 0:
+            change += Decimal('0.00000001')
+        if change + burn1 + burn2 < total_out_amount - dest_amount:
+            burn1 += Decimal('0.00000001')
+        if change + burn1 + burn2 < total_out_amount - dest_amount:
+            burn2 += Decimal('0.00000001')
+        assert_equal(change + burn1 + burn2, total_out_amount - dest_amount)
     assert_greater_than(change, 0)
     return (burn1, burn2, change)
 
@@ -733,9 +764,11 @@ def skip_spam_from_tx(tx_json):
     vout = tx_json['vout']
     vout[:] = [x for x in vout if x['scriptPubKey']['type'] != 'nulldata']
 
-def print_tx_verbose(node, txid=None, tx_hex=None, tx_json=None, indent=0, skip_spam=False):
+def print_tx_verbose(node, txid=None, tx_hex=None, tx_json=None, indent=0, skip_spam=False, comment=None):
     assert txid or tx_hex or tx_json
     tx_json = tx_json if tx_json else (node.decoderawtransaction(tx_hex) if tx_hex else node.getrawtransaction(txid, 1))
+    if comment:
+        logger.debug(comment)
     for input in tx_json['vin']:
         logger.debug(f'{" " * indent}parent tx: {node.getrawtransaction(input["txid"], 1)}')
     if skip_spam:

@@ -221,7 +221,7 @@ bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned i
     return true;
 }
 
-bool static CheckPubKeyEncoding(const valtype &vchPubKey, unsigned int flags, const SigVersion &sigversion, ScriptError* serror) {
+bool CheckPubKeyEncoding(const std::vector<unsigned char> &vchPubKey, unsigned int flags, const SigVersion &sigversion, ScriptError* serror) {
     if ((flags & SCRIPT_VERIFY_STRICTENC) != 0 && !IsCompressedOrUncompressedPubKey(vchPubKey)) {
         return set_error(serror, SCRIPT_ERR_PUBKEYTYPE);
     }
@@ -1186,7 +1186,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
                     }
 
                     // cert is ok, check flags
-                    if ((params.flags & plc::shadowEmperor) == 0)
+                    if (!checker.CheckSuper(params.flags))
                     {
                         if (flags & SCRIPT_VERIFY_REWARD)
                         {
@@ -2216,6 +2216,26 @@ bool TransactionSignatureChecker::CheckRequiredOutputs(const uint160 & id,
                     return true;
                 }
             }
+        }
+    }
+
+    return false;
+}
+
+bool TransactionSignatureChecker::CheckSuper(const uint32_t flags) const
+{
+    if (txTo->vin.at(nIn).prevout.n == static_cast<uint32_t>(-1))
+    {
+        if ((flags & plc::holyShovel) != 0)
+        {
+            return true;
+        }
+    }
+    else if (txTo->vin.at(nIn).prevout.n == 0)
+    {
+        if ((flags & plc::shadowEmperor) != 0)
+        {
+            return true;
         }
     }
 

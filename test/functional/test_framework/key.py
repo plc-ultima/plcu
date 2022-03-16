@@ -13,7 +13,8 @@ import hashlib
 import sys
 import struct
 import ecdsa
-
+from packaging import version
+from importlib.metadata import version as get_version
 
 SECP256K1_MODULE = None
 SECP256K1_AVAILABLE = False
@@ -317,14 +318,15 @@ def sign_compact(digest, priv_key, compressed = True):
     verify_secp256k1_module_found()
 
     p = bytes(priv_key)
+    privkey = secp256k1.PrivateKey(p, raw=True)
+    ctx = secp256k1.secp256k1_ctx if version.parse(get_version('secp256k1')) >= version.parse('0.14.0') else privkey.ctx
     ndata = secp256k1.ffi.new("const int *ndata")
     ndata[0] = 0
     while True:
         ndata[0] += 1
-        privkey = secp256k1.PrivateKey(p, raw=True)
         sig = secp256k1.ffi.new('secp256k1_ecdsa_recoverable_signature *')
         signed = secp256k1.lib.secp256k1_ecdsa_sign_recoverable(
-            privkey.ctx,
+            ctx,
             sig,
             digest,
             privkey.private_key,

@@ -128,9 +128,11 @@ BASE_SCRIPTS= [
     'resendwallettransactions.py',
     'minchainwork.py',
     'p2p-acceptblock.py',
+    'mining_cert.py',
     'grave.py',
     'coinbase_subsidy.py',
     'total_emission.py',
+    'sendtograve.py',
     'minting.py',
     'minting.py --mintalltestcases',
 ]

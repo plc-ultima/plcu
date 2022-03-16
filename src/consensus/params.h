@@ -87,6 +87,9 @@ struct Params {
     int         defaultFeeReductionBlock;
     /** total money supply */
     CAmount     maxTotalAmount;
+
+    /** after this block, mining without certificates is prohibited */
+    uint32_t    holyMiningBlock;
 };
 
 } // namespace Consensus

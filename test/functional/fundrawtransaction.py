@@ -4,8 +4,9 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the fundrawtransaction RPC."""
 
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import *
+from test_framework.script import *
 
 
 def get_unspent(listunspent, amount):
@@ -577,10 +578,16 @@ class RawTransactionsTest(BitcoinTestFramework):
 
         rawtxfund = self.nodes[2].fundrawtransaction(rawtx)
         dec_tx  = self.nodes[2].decoderawtransaction(rawtxfund['hex'])
-
+        # print_tx_verbose(self.nodes[2], tx_json=dec_tx)
         assert_greater_than(len(dec_tx['vin']), 0) # at least one vin
-        assert_equal(len(dec_tx['vout']), 2 + burn_outputs_cnt) # one change output added
-
+        assert_equal(len(dec_tx['vout']), 2) # one change output added, no burn outputs: input_address == change_address
+        parent_tx = self.nodes[2].getrawtransaction(dec_tx['vin'][0]['txid'], 1)
+        return_output_index = find_output(self.nodes[2], None, 0, dec_tx)
+        change_output_index = 1 - return_output_index
+        change_address = dec_tx['vout'][change_output_index]['scriptPubKey']['addresses'][0]
+        parent_vout = dec_tx['vin'][0]['vout']
+        input_address = parent_tx['vout'][parent_vout]['scriptPubKey']['addresses'][0]
+        assert_equal(input_address, change_address)
 
         ##################################################
         # test a fundrawtransaction using only watchonly #
@@ -616,8 +623,16 @@ class RawTransactionsTest(BitcoinTestFramework):
         assert_equal(len(res_dec["vin"]), 2)
         assert(res_dec["vin"][0]["txid"] == watchonly_txid or res_dec["vin"][1]["txid"] == watchonly_txid)
 
+        spendable_unspents = [u for u in self.nodes[3].listunspent(1) if u['spendable']]
+        watchonly_unspents = [u for u in self.nodes[3].listunspent(1) if not u['spendable']]
+        assert_equal(len(spendable_unspents), 1)
+        assert_equal(len(watchonly_unspents), 1)
+        spendable_unspent = spendable_unspents[0]
+        changepos = result["changepos"]
         assert_greater_than(result["fee"], 0)
-        assert_greater_than(result["changepos"], -1)
+        assert_greater_than(changepos, -1)
+        change_address = res_dec['vout'][changepos]['scriptPubKey']['addresses'][0]
+
         grave_out1 = find_output_by_address(None, GRAVE_ADDRESS_1, tx_raw=res_dec)
         grave_out2 = find_output_by_address(None, GRAVE_ADDRESS_2, tx_raw=res_dec)
         grave_amount1 = res_dec["vout"][grave_out1]["value"]
@@ -628,7 +643,19 @@ class RawTransactionsTest(BitcoinTestFramework):
         assert(not signedtx["complete"])
         signedtx = self.nodes[0].signrawtransaction(signedtx["hex"])
         assert(signedtx["complete"])
-        self.nodes[0].sendrawtransaction(signedtx["hex"])
+        txid = self.nodes[0].sendrawtransaction(signedtx["hex"])
+        if change_address != spendable_unspent['address']:
+            # change is returned to watch-only address, that's what we don't expect,
+            # spend it and send coins to normal node3 address instead:
+            inputs = [{'txid': txid, 'vout': changepos}]
+            amount_to = res_dec['vout'][changepos]['value'] - 2 - fee
+            outputs = {AddressFromPubkeyHash(hash160(b'random')): amount_to, GRAVE_ADDRESS_1: 1, GRAVE_ADDRESS_2: 1}
+            rawtx = self.nodes[0].createrawtransaction(inputs, outputs)
+            signedtx = self.nodes[0].signrawtransaction(rawtx)
+            assert (signedtx['complete'])
+            self.nodes[0].sendrawtransaction(signedtx['hex'])
+            self.nodes[0].sendtoaddress(spendable_unspent['address'], 20)
+            self.log.debug('Refilled')
         self.nodes[0].generate(1)
         self.sync_all()
 
@@ -683,17 +710,19 @@ class RawTransactionsTest(BitcoinTestFramework):
                   self.nodes[3].fundrawtransaction(rawtx, {"feeRate": 2*min_relay_tx_fee, "subtractFeeFromOutputs": [0]})]
 
         dec_tx = [self.nodes[3].decoderawtransaction(tx['hex']) for tx in result]
-        output = [d['vout'][find_output_by_address(None, dest_addr, tx_raw=d)]['value'] for d, r in zip(dec_tx, result)]
+        output = [d['vout'][find_output_by_address(None, dest_addr, tx_raw=d)]['value'] for d in dec_tx]
         change = [d['vout'][r['changepos']]['value'] for d, r in zip(dec_tx, result)]
+        burned = [d['vout'][find_output_by_address(None, GRAVE_ADDRESS_1, tx_raw=d)]['value'] +
+                  d['vout'][find_output_by_address(None, GRAVE_ADDRESS_2, tx_raw=d)]['value'] for d in dec_tx]
 
         assert_equal(result[0]['fee'], result[1]['fee'], result[2]['fee'])
         assert_equal(result[3]['fee'], result[4]['fee'])
         assert_equal(change[0], change[1])
         assert_equal(output[0], output[1])
-        assert_equal(output[0], output[2] + result[2]['fee'])
-        # assert_equal(change[0] + result[0]['fee'], change[2]) # change differs a little due to burn (burn is calculated after fee)
-        assert_equal(output[3], output[4] + result[4]['fee'])
-        # assert_equal(change[3] + result[3]['fee'], change[4]) # change differs a little due to burn (burn is calculated after fee)
+        assert_equal(output[0], output[2] + result[2]['fee'] + burned[2])
+        assert_equal(change[0] + result[0]['fee'] + burned[0], change[2])
+        assert_equal(output[3], output[4] + result[4]['fee'] + burned[4])
+        assert_equal(change[3] + result[3]['fee'] + burned[3], change[4])
 
         inputs = []
         outputs = {self.nodes[2].getnewaddress(): value for value in (1.0, 1.1, 1.2, 1.3)}
@@ -707,8 +736,11 @@ class RawTransactionsTest(BitcoinTestFramework):
                   self.nodes[3].decoderawtransaction(result[1]['hex'])]
 
         # Nested list of non-change output amounts for each transaction
-        output = [[out['value'] for i, out in enumerate(d['vout']) if i != r['changepos']]
-                  for d, r in zip(dec_tx, result)]
+        output = [[out['value'] for out in d['vout'] if out['scriptPubKey']['addresses'][0] in outputs]
+                  for d in dec_tx]
+        burned = [[out['value'] for out in d['vout'] if out['scriptPubKey']['addresses'][0] in [GRAVE_ADDRESS_1, GRAVE_ADDRESS_2]]
+                  for d in dec_tx]
+        burned_total = [sum(bur_outputs) for bur_outputs in burned]
 
         # List of differences in output amounts between normal and subtractFee transactions
         share = [o0 - o1 for o0, o1 in zip(output[0], output[1])]
@@ -732,7 +764,7 @@ class RawTransactionsTest(BitcoinTestFramework):
         assert_equal(result[0]['fee'], result[1]['fee'])
 
         # the total subtracted from the outputs is equal to the fee
-        assert_equal(share[0] + share[2] + share[3], result[0]['fee'])
+        assert_equal(share[0] + share[2] + share[3], result[0]['fee'] + burned_total[1])
 
 if __name__ == '__main__':
     RawTransactionsTest().main()

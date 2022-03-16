@@ -113,8 +113,6 @@ enum
     SCRIPT_VERIFY_REWARD = (1U << 16),
 };
 
-bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
-
 struct PrecomputedTransactionData
 {
     uint256 hashPrevouts, hashSequence, hashOutputs;
@@ -127,6 +125,9 @@ enum SigVersion
     SIGVERSION_BASE = 0,
     SIGVERSION_WITNESS_V0 = 1,
 };
+
+bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
+bool CheckPubKeyEncoding(const std::vector<unsigned char> &vchPubKey, unsigned int flags, const SigVersion &sigversion, ScriptError* serror);
 
 uint256 SignatureHash(const CScript &scriptCode, const CTransaction& txTo, unsigned int nIn, int nHashType, const CAmount& amount, SigVersion sigversion, const PrecomputedTransactionData* cache = nullptr);
 
@@ -143,12 +144,12 @@ public:
         return false;
     }
 
-    virtual bool CheckLockTime(const CScriptNum& nLockTime) const
+    virtual bool CheckLockTime(const CScriptNum& /*nLockTime*/) const
     {
          return false;
     }
 
-    virtual bool CheckSequence(const CScriptNum& nSequence) const
+    virtual bool CheckSequence(const CScriptNum& /*nSequence*/) const
     {
          return false;
     }
@@ -162,6 +163,11 @@ public:
 
     virtual bool CheckRequiredOutputs(const uint160 & /*id*/,
                                       const CAmount & /*amount*/) const
+    {
+        return false;
+    }
+
+    virtual bool CheckSuper(const uint32_t /*flags*/) const
     {
         return false;
     }
@@ -223,6 +229,7 @@ public:
     bool CheckRequiredOutputs(const uint160 & id,
                               const CAmount & amount) const;
 
+    bool CheckSuper(const uint32_t flags) const;
 
 private:
     bool CheckRewardInternal(const std::vector<plc::Certificate> & certs,

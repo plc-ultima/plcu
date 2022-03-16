@@ -6,6 +6,7 @@
 
 import struct
 from test_framework.test_framework import BitcoinTestFramework
+from test_framework.mininode import *
 from test_framework.util import *
 
 class TxnMallTest(BitcoinTestFramework):
@@ -57,37 +58,14 @@ class TxnMallTest(BitcoinTestFramework):
         rawtx1 = self.nodes[0].getrawtransaction(txid1,1)
         outputs_count = 4  # dest, change, burn1, burn2
         assert_equal(len(rawtx1['vout']), outputs_count)
-        clone_inputs = [{"txid":rawtx1["vin"][0]["txid"],"vout":rawtx1["vin"][0]["vout"]}]
-        clone_outputs = {rawtx1["vout"][0]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][0]["value"],
-                         rawtx1["vout"][1]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][1]["value"],
-                         rawtx1["vout"][2]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][2]["value"],
-                         rawtx1["vout"][3]["scriptPubKey"]["addresses"][0]:rawtx1["vout"][3]["value"]}
-        clone_locktime = rawtx1["locktime"]
-        clone_raw = self.nodes[0].createrawtransaction(clone_inputs, clone_outputs, clone_locktime)
 
-        # createrawtransaction randomizes the order of its outputs, so swap them if necessary.
-        # output 0 is at version+#inputs+input+sigstub+sequence+#outputs
-        # 40 PLCU serialized is 00286bee00000000
-        hex_outputs = {}
-        pos0 = 2*(4+1+36+1+4+1)
-        assert_equal(clone_raw[pos0-2:pos0], f'0{outputs_count}')
-        cur_pos = pos0
-        output_len_sum = 0
-        for i in range(outputs_count):
-            output_len = (8 + 1 + int(clone_raw[cur_pos+16:cur_pos+18], 16)) * 2
-            hex_output = clone_raw[cur_pos: cur_pos + output_len]
-            value = struct.unpack("<q", bytearray.fromhex(hex_output[:16]))[0]
-            hex_outputs[value] = hex_output
-            cur_pos += output_len
-            output_len_sum += output_len
-        for i in range(outputs_count):
-            assert_in(ToSatoshi(rawtx1["vout"][i]["value"]), hex_outputs)
-        clone_raw = clone_raw[:pos0] + \
-                    hex_outputs[ToSatoshi(rawtx1["vout"][0]["value"])] + \
-                    hex_outputs[ToSatoshi(rawtx1["vout"][1]["value"])] + \
-                    hex_outputs[ToSatoshi(rawtx1["vout"][2]["value"])] + \
-                    hex_outputs[ToSatoshi(rawtx1["vout"][3]["value"])] + \
-                    clone_raw[pos0 + output_len_sum:]
+        tx1_cl = CTransaction()
+        tx1_cl.nVersion = 2
+        tx1_cl.vin = [CTxIn(COutPoint(int(rawtx1['vin'][0]['txid'], 16), rawtx1['vin'][0]['vout']), b'', 0xFFFFFFFE)]
+        for out in rawtx1['vout']:
+            tx1_cl.vout.append(CTxOut(ToSatoshi(out['value']), hex_str_to_bytes(out['scriptPubKey']['hex'])))
+        tx1_cl.nLockTime = rawtx1['locktime']
+        clone_raw = bytes_to_hex_str(tx1_cl.serialize())
 
         # Use a different signature hash type to sign.  This creates an equivalent but malleated clone.
         # Don't send the clone anywhere yet

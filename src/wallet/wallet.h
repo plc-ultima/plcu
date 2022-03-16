@@ -15,7 +15,7 @@
 #include "validationinterface.h"
 #include "script/ismine.h"
 #include "script/sign.h"
-#include "wallet/crypter.h"
+#include "crypto/crypter.h"
 #include "wallet/walletdb.h"
 #include "wallet/rpcwallet.h"
 
@@ -681,12 +681,7 @@ private:
     int64_t nLastResend;
     bool fBroadcastTransactions;
 
-    // taxfree cert
     std::string                              m_taxfreeCertFileName;
-    std::vector<std::vector<unsigned char> > m_taxfreePubkeys;
-    std::vector<plc::Certificate>            m_taxfreeCerts;
-
-
     /**
      * Used to keep track of spent outpoints, and
      * detect and report conflicts (double-spends or

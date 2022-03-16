@@ -34,6 +34,7 @@ bench_bench_plcultima_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(EVENT_CLFA
 bench_bench_plcultima_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 bench_bench_plcultima_LDADD = \
   $(LIBBITCOIN_SERVER) \
+  $(LIBBITCOIN_WALLET) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
   $(LIBBITCOIN_CONSENSUS) \

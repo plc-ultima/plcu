@@ -143,6 +143,7 @@ LIBS += \
     -ldb_cxx$$BDB_LIB_SUFFIX \
     -lpthread \
     -levent \
+    -levent_pthreads \
     -lzmq
 
 windows {
@@ -573,7 +574,7 @@ SOURCES += \
     src/qt/walletmodel.cpp \
     src/qt/overviewpage.cpp \
     src/qt/csvmodelwriter.cpp \
-    src/wallet/crypter.cpp \
+    src/crypto/crypter.cpp \
     src/qt/sendcoinsentry.cpp \
     src/qt/qvalidatedlineedit.cpp \
     src/qt/bitcoinunits.cpp \
@@ -712,7 +713,8 @@ LIBS += \
     -lboost_filesystem$$BOOST_LIB_SUFFIX \
     -lboost_program_options$$BOOST_LIB_SUFFIX \
     -lboost_thread$$BOOST_THREAD_LIB_SUFFIX \
-    -lboost_date_time$$BOOST_THREAD_LIB_SUFFIX
+    -lboost_date_time$$BOOST_THREAD_LIB_SUFFIX \
+    -lboost_chrono$$BOOST_LIB_SUFFIX
 
 windows:LIBS += -lboost_chrono$$BOOST_LIB_SUFFIX
 

@@ -29,6 +29,7 @@
 #include "scheduler.h"
 #include "timedata.h"
 #include "txmempool.h"
+#include "univalue.h"
 #include "util.h"
 #include "ui_interface.h"
 #include "utilmoneystr.h"
@@ -144,6 +145,75 @@ CWallet::~CWallet()
 
 //******************************************************************************
 //******************************************************************************
+bool loadCertFromFile(const std::string & argName,
+                      std::vector<std::vector<unsigned char> > & pubkeys,
+                      std::vector<plc::Certificate> & certs,
+                      std::string & fileName)
+{
+    fs::path fn = gArgs.GetArg(argName, "");
+    if (fn.empty())
+    {
+        return false;
+    }
+
+    if (!is_regular_file(fn))
+    {
+        fn = GetDataDir() / fn;
+        if (!is_regular_file(fn))
+        {
+            return false;
+        }
+    }
+
+    fileName = fn.string();
+
+    std::ifstream ifs(fn.string());
+    if (!ifs.good())
+    {
+        return false;
+    }
+
+    std::string data;
+    std::getline(ifs, data, '\0');
+
+    UniValue v(UniValue::VOBJ);
+    if (!v.read(data))
+    {
+        return false;
+    }
+
+    UniValue spubkeys = find_value(v, "pubkeys").get_array();
+    for (uint32_t i = 0; i < spubkeys.size(); ++i)
+    {
+        pubkeys.emplace_back(ParseHex(spubkeys[i].get_str()));
+        if (!CPubKey(pubkeys.back()).IsFullyValid())
+        {
+            return false;
+        }
+    }
+
+    UniValue scerts = find_value(v, "certs").get_array();
+    for (uint32_t i = 0; i < scerts.size(); ++i)
+    {
+        UniValue o = scerts[i].get_obj();
+
+        plc::Certificate cert;
+        cert.txid = uint256S(find_value(o, "txid").get_str());
+        cert.vout = find_value(o, "vout").get_int();
+
+        certs.emplace_back(cert);
+    }
+
+    if (!pubkeys.empty() && !certs.empty())
+    {
+        return true;
+    }
+
+    return false;
+}
+
+//******************************************************************************
+//******************************************************************************
 void CWallet::SetNull()
 {
     nWalletVersion         = FEATURE_BASE;
@@ -162,28 +232,24 @@ void CWallet::SetNull()
     fScanningWallet        = false;
 
     std::string fileName;
-    if (!loadTaxFreeCert(m_taxfreePubkeys, m_taxfreeCerts, fileName))
+    std::vector<std::vector<unsigned char> > pubkeys;
+    std::vector<plc::Certificate> certs;
+    if (!loadCertFromFile("-taxfreecert", pubkeys, certs, fileName))
     {
-        m_taxfreePubkeys.clear();
-        m_taxfreeCerts.clear();
         LogPrintStr("Cert not loaded - " + fileName + "\n");
     }
     else
     {
-        plc::CertParameters params;
-        if (!plc::Validator().validateChainOfCerts(m_taxfreeCerts, m_taxfreePubkeys, params))
+        if (!setCert(pubkeys, certs))
         {
-            m_taxfreePubkeys.clear();
-            m_taxfreeCerts.clear();
             LogPrintStr("Invalid cert chain - " + fileName + "\n");
         }
         else
         {
             LogPrintStr("taxfree cert OK - " + fileName + "\n");
+            m_taxfreeCertFileName = fileName;
         }
     }
-
-    m_taxfreeCertFileName = fileName;
 }
 
 //******************************************************************************
@@ -2833,8 +2899,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
         graveAmounts[p.first] = 0;
     }
 
-    bool is_taxFree     = (m_taxfreePubkeys.size() > 0 &&
-                           m_taxfreeCerts.size() > 0);
+    bool is_taxFree     = hasTaxFreeCert();
     bool is_sendToSelf  = false;
 
     // check recipients

@@ -341,7 +341,15 @@ public:
 
     bool IsCoinBase() const
     {
-        return (vin.size() == 1 && vin[0].prevout.IsNull());
+        for (const CTxIn & in : vin)
+        {
+            if (!in.prevout.IsNull())
+            {
+                return false;
+            }
+        }
+        return true;
+        // return (vin.size() == 1 && vin[0].prevout.IsNull());
     }
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)

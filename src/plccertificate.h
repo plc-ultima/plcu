@@ -59,22 +59,23 @@ struct Certificate
 // misk flags
 enum
 {
-    hasDeviceKey      = 0x00000001,
-    hasBeneficiaryKey = 0x00000002,
-    hasExpirationDate = 0x00000004,
-    hasMintingLimit   = 0x00000008,
-    hasMaxload        = 0x00000010,
+    hasDeviceKey          = 0x00000001,
+    hasBeneficiaryKey     = 0x00000002,
+    hasExpirationDate     = 0x00000004,
+    hasMintingLimit       = 0x00000008,
+    hasMaxload            = 0x00000010,
     hasBeneficiaryPercent = 0x00000020,
     hasFreeBenPercent     = 0x00000040,
-    hasOtherData      = 0x00000800,
-    fastMinting       = 0x00010000,
-    freeBen           = 0x00020000,
-    silverHoof        = 0x00040000,
-    shadowEmperor     = 0x00080000,
-    generalFlags      = 0x0fff0000,
-    localFlags        = 0x00000fff,
-    pubkeyCountMask   = 0x0000f000,
-    requireCountMask  = 0xf0000000,
+    hasOtherData          = 0x00000800,
+    fastMinting           = 0x00010000,
+    freeBen               = 0x00020000,
+    silverHoof            = 0x00040000,
+    shadowEmperor         = 0x00080000,
+    holyShovel            = 0x00100000,
+    generalFlags          = 0x0fff0000,
+    localFlags            = 0x00000fff,
+    pubkeyCountMask       = 0x0000f000,
+    requireCountMask      = 0xf0000000,
 };
 
 //******************************************************************************

@@ -195,7 +195,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
         std::set<COutPoint> vInOutPoints;
         for (const auto& txin : tx.vin)
         {
-            if (!vInOutPoints.insert(txin.prevout).second)
+            if (!txin.prevout.IsNull() && !vInOutPoints.insert(txin.prevout).second)
                 return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputs-duplicate");
         }
     }
