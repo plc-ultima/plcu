@@ -2312,7 +2312,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
 
-    CAmount totalAmount  = getTotalAmount().first;
+    CAmount totalAmount  = IsInitialBlockDownload() ? 0 : getTotalAmount().first;
     CAmount blockSubsidy = GetBlockSubsidy(pindex->nHeight, nFees, chainparams.GetConsensus());
     CAmount foundSubsidy = 0;
     CAmount foundAward   = 0;

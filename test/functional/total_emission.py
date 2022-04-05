@@ -40,9 +40,9 @@ class TestNode(NodeConnCB):
 
 class TotalEmissionTest(BitcoinTestFramework):
     def set_test_params(self):
-        self.num_nodes = 1
+        self.num_nodes = 2
         self.setup_clean_chain = False
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=1000']]
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=1000']] * self.num_nodes
         self.outpoints = []
         self.moneybox_utxo_amounts = {}
 
@@ -86,6 +86,7 @@ class TotalEmissionTest(BitcoinTestFramework):
 
     def run_test(self):
         node0 = self.nodes[0]
+        node1 = self.nodes[1]
         self.test_node.sync_with_ping()
         fee = Decimal('0.00001')
         fee_sum = 0
@@ -121,7 +122,7 @@ class TotalEmissionTest(BitcoinTestFramework):
 
         height = node0.getblockcount()
         txoutsetinfo = node0.gettxoutsetinfo()
-        total_mined = BASE_CB_AMOUNT * 100 + Decimal('0.005') * (height - 100)
+        total_mined = BASE_CB_AMOUNT * 100 + CB_AMOUNT_AFTER_BLOCK_100 * (height - 100)
         total_moneybox = 100 * 10 * 100
         self.log.debug(f'height: {height}, total_mined: {total_mined}, total_moneybox: {total_moneybox}, fee_sum: {fee_sum}, txoutsetinfo: {txoutsetinfo}')
         total_amount = txoutsetinfo['total_amount']
@@ -132,7 +133,17 @@ class TotalEmissionTest(BitcoinTestFramework):
         last_iteration = False
         moneybox_gran = 100
         mint_fee = fee * 100
+        fork_on_iterations = [1,3]
         for i in range(7):
+            fee_sum_this_iter = 0
+            moneybox_utxos_this_iter = []
+            use_fork = (i in fork_on_iterations)
+            total_moneybox_this_iter = 0
+            total_mined_this_iter = 0
+            if use_fork:
+                self.sync_all()
+                disconnect_nodes(node0, 1)
+                disconnect_nodes(node1, 0)
             for j in range(2):
                 mint_reward_now = min(mint_reward, int(TOTAL_EMISSION_LIMIT - total_amount) // 100 * 100)
                 if not mint_reward_now:
@@ -140,19 +151,21 @@ class TotalEmissionTest(BitcoinTestFramework):
                     mint_reward_now = 0 if len(mint_rewards_on_last_iteration) == 0 else mint_rewards_on_last_iteration.pop()
                     if not mint_reward_now:
                         break
+                assert(not (last_iteration and use_fork))  # don't use fork on last iteration
                 needed_moneybox_utxos = mint_reward_now // moneybox_gran
                 self.log.debug(f'iter: {i}-{j}, mint_reward_now: {mint_reward_now}, last_iteration: {last_iteration}')
                 now = node0.getblockheader(node0.getbestblockhash())['time']
                 (tx3, _) = compose_mint_tx([self.outpoints.pop()], moneybox_utxos[0:needed_moneybox_utxos],
                                            COutPoint(int(root_cert_hash, 16), 0), COutPoint(int(ca3_cert_hash, 16), 0),
                                            user_key, Decimal(4500), now + ONE_YEAR * 10, Decimal(mint_reward_now) - mint_fee, 0, True)
-                send_tx(node0, self.test_node, tx3, True)
+                mint_txid = send_tx(node0, self.test_node, tx3, True)
+                self.log.debug(f'sent mint_tx: {mint_txid}')
                 del moneybox_utxos[0:needed_moneybox_utxos]
                 next_block_hash = node0.generate(1)[0]
                 if not last_iteration:
-                    moneybox_utxos.extend(self.parse_moneybox_utxos(next_block_hash))
-                    assert_equal(len(moneybox_utxos), 1000)
-                    total_moneybox += mint_reward_now
+                    moneybox_utxos_this_iter.extend(self.parse_moneybox_utxos(next_block_hash))
+                    assert_equal(len(moneybox_utxos) + len(moneybox_utxos_this_iter), 1000)
+                    total_moneybox_this_iter += mint_reward_now
                 else:
                     # TODO: compose block with mb refill and confirm rejected
                     more = self.parse_moneybox_utxos(next_block_hash, True)
@@ -161,25 +174,49 @@ class TotalEmissionTest(BitcoinTestFramework):
                         last_moneybox_amount = self.moneybox_utxo_amounts[more[0]]
                         assert_greater_than(100, last_moneybox_amount)
                         moneybox_utxos.extend(more)
-                        total_moneybox += last_moneybox_amount
+                        total_moneybox_this_iter += last_moneybox_amount
                         self.log.debug(f'iter: {i}-{j}, last_moneybox_amount: {last_moneybox_amount}')
                     else:
                         assert_equal(len(more), 0)
-                fee_sum += mint_fee
-                total_mined += Decimal('0.005')
+                fee_sum_this_iter += mint_fee
+                total_mined_this_iter += CB_AMOUNT_AFTER_BLOCK_100
                 txoutsetinfo = node0.gettxoutsetinfo()
                 total_amount = txoutsetinfo['total_amount']
-                self.log.debug(f'iter: {i}-{j}, height: {node0.getblockcount()}, total_mined: {total_mined}, total_moneybox: {total_moneybox}, fee_sum: {fee_sum}, txoutsetinfo: {txoutsetinfo}')
-                assert_equal(total_amount, total_mined + total_moneybox - fee_sum)
+                self.log.debug(f'iter: {i}-{j}, height: {node0.getblockcount()}, total_mined_this_iter: {total_mined_this_iter}, total_mined: {total_mined}, total_moneybox_this_iter: {total_moneybox_this_iter}, total_moneybox: {total_moneybox}, fee_sum_this_iter: {fee_sum_this_iter}, fee_sum: {fee_sum}, txoutsetinfo: {txoutsetinfo}')
+                assert_equal(total_amount, total_mined + total_mined_this_iter + total_moneybox + total_moneybox_this_iter - fee_sum - fee_sum_this_iter)
                 if not last_iteration:
                     assert_greater_than_or_equal(TOTAL_EMISSION_LIMIT, total_amount)
             if not mint_reward_now:
                 break
-            node0.generate(98)
-            total_mined += Decimal('0.005') * 98
+            blocks_to_gen = 101
+            if use_fork:
+                self.log.debug(f'fork, iter {i}')
+                # We called node0.generate() twice after nodes were disconnected, ensure it
+                assert_equal(node0.getblockcount(), node1.getblockcount() + 2)
+                # generate longer chain on node1, node0 will switch to it and put 2 mined mint transactions back to mempool
+                node1.generate(3)
+                connect_nodes(node0, 1)
+                sync_blocks(self.nodes)
+                txoutsetinfo = node0.gettxoutsetinfo()
+                total_amount = txoutsetinfo['total_amount']
+                # verify total amount after fork, don't count
+                # total_mined_this_iter and total_moneybox_this_iter - old chain is no more actual
+                assert_equal(total_amount, total_mined + CB_AMOUNT_AFTER_BLOCK_100 * 3 + total_moneybox - fee_sum)
+                next_block_hash = node0.generate(1)[0]
+                moneybox_utxos.extend(self.parse_moneybox_utxos(next_block_hash))
+                blocks_to_gen -= 2
+            else:
+                moneybox_utxos.extend(moneybox_utxos_this_iter)
+            if not last_iteration:
+                assert_equal(len(moneybox_utxos), 1000)
+            fee_sum += fee_sum_this_iter
+            total_mined += total_mined_this_iter
+            total_moneybox += total_moneybox_this_iter
+            node0.generate(blocks_to_gen)
+            total_mined += CB_AMOUNT_AFTER_BLOCK_100 * 101
 
         # Here we reached TOTAL_EMISSION_LIMIT, but have a little coins in moneybox (less than 100 coins)
-        assert_greater_than_or_equal(TOTAL_EMISSION_LIMIT, total_amount - 2 * Decimal('0.005'))
+        assert_greater_than_or_equal(TOTAL_EMISSION_LIMIT, total_amount - 2 * CB_AMOUNT_AFTER_BLOCK_100)
         assert_greater_than(total_amount, TOTAL_EMISSION_LIMIT - ToCoins('0.1'))
 
 

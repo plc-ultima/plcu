@@ -39,6 +39,25 @@ exclude_transactions = set(
         'e71ab65a77edb3bab1eb7159f00328c8ea46f67606c08567c1cc6736d20fb810', # -//-
         'dcb0ed15d7d881aa795a710518c2eb30475b91710558e31f07e42eb51fa573aa', # -//-
         '757d0600e43b77426dfb1c97a711eb4c35d1e344cd755841322dce84fa873508', # -//-
+        '54cb75c44b9189f25d166903a9dde3ac53124889ea1dbc4aa2996fff5788de13', # main, bad burn
+        '28b799300c7fde2cd5e0c44581155235e63e23e8aea0ba69877803708da63f90', # main, bad burn
+        'c3d0b129fb6c628fcb066640cdfa6243686d94d6aea4fd4d9eff0c9312a29159', # main, bad burn
+        '33c7b71543f9b3e70bb45f71925e15adeb137c7d35c9fd1028014d3b609c8593', # main, bad burn
+        '45316835cb1f6a8feda6484d2902862204097339a5e91323b45b0049738409cc', # main, bad burn
+        '61cefcd16382a64b3a39c8c849a2a9367a8953de5f763556c84575e49a59ec75', # main, bad burn
+        '35b94bd12780dd23a324560e89abb2b8fdea3dfff432ee0f673c65f0d69de12a', # main, bad burn
+        '5ecbd3305b5bdb50a53b3bf899d7915d435043e27a363832977d3ea72e0e15b8', # main, bad burn
+        'de94fd3fccbe8e1b1ac9b47b08a589ecca7134f07b2d0134a9666470c23ba9c5', # main, bad burn
+        '6ac35e317c84685271f945886389bb5abf3710052b10a267cabd47a68e564803', # main, bad burn
+        'ea8a4d0171deabf442518206af0ae919210ad1dcfd09adf99a7f93f39aad2876', # main, bad burn
+        '937916a4f507adf04fef5d22d154ec676fc57a30ac236bd97e5d119fab2301fa', # main, bad burn
+        '516df4f8ddb9ad9a038ad972e57cdd6ff3ad0ccaa79c7d7c74cb09c9a783acd7', # main, bad burn
+        'adabc94f2322fef194ef4c64cb24156146f7a72c6278d6be04cae8ebdfc2cf5a', # main, bad burn
+        'fef87257bbe89d22b67bb2f9884e5313ddb838832087a28de90250580881554a', # main, bad burn
+        '372b1a62d4f93b5436ec31a7dbe76cca0df88053c1e7045112a3bec26acee69b', # main, bad burn
+        'dd04613103d206dc2015a194d9860fa1d1335c32707afa02d96e1193d687e9f7', # main, bad burn
+        '009476084032c5f844eab33b1a94917d06212f925e014135e0a749f26d1326a9', # main, bad burn
+        'fee9c9dfcce2391c9685852f2a4c2356144bb22899ade138ddc0c2a81edf7935', # main, bad burn
     ]
 )
 
@@ -51,6 +70,11 @@ RULES_VERSION = 4
 
 def IsOp(script, op):
     return len(script) == 1 and script[0] == op
+
+
+def spaces(indent):
+    return ' ' * indent * 2
+
 
 class AddrInfo:
     addr_type = None
@@ -67,8 +91,12 @@ def GetAddressInfo(scriptPubKey):
     if len(scriptPubKey) == 0:
         return AddrInfo('empty')
 
-    def suffix(lock_timepoint, cert):
-        return ('_locked' if lock_timepoint else '') + (' certificate' if cert else '')
+    def is_grave_pkh(pkh):
+        grave_pkh = GRAVE_1_PKH_TESTNET if TESTNET else GRAVE_1_PKH_MAINNET
+        return pkh == grave_pkh
+
+    def suffix(lock_timepoint, cert, burn):
+        return ('_locked' if lock_timepoint else '') + (' certificate' if cert else '') + (' burn' if burn else '')
 
     script = CScript(scriptPubKey)
     ops = ExtractAllFromScript(script)
@@ -91,7 +119,7 @@ def GetAddressInfo(scriptPubKey):
     if len(ops) == 2 and \
             len(ops[0]) == 33 and \
             IsOp(ops[1], OP_CHECKSIG):
-        return AddrInfo('p2pk' + suffix(lock_timepoint, cert), [ops[0]], lock_timepoint)
+        return AddrInfo('p2pk' + suffix(lock_timepoint, cert, is_grave_pkh(hash160(ops[0]))), [ops[0]], lock_timepoint)
 
     if len(ops) == 5 and \
             IsOp(ops[0], OP_DUP) and \
@@ -99,16 +127,16 @@ def GetAddressInfo(scriptPubKey):
             len(ops[2]) == 20 and \
             IsOp(ops[3], OP_EQUALVERIFY) and \
             IsOp(ops[4], OP_CHECKSIG):
-        return AddrInfo('p2pkh' + suffix(lock_timepoint, cert), [ops[2]], lock_timepoint)
+        return AddrInfo('p2pkh' + suffix(lock_timepoint, cert, is_grave_pkh(ops[2])), [ops[2]], lock_timepoint)
 
     if len(ops) == 3 and \
             IsOp(ops[0], OP_HASH160) and \
             len(ops[1]) == 20 and \
             IsOp(ops[2], OP_EQUAL):
         if ops[1] == hash160(bytearray([int(OP_CHECKREWARD)])):
-            return AddrInfo('p2sh_moneybox' + suffix(lock_timepoint, cert), [ops[1]], lock_timepoint)
+            return AddrInfo('p2sh_moneybox' + suffix(lock_timepoint, cert, False), [ops[1]], lock_timepoint)
         else:
-            return AddrInfo('p2sh' + suffix(lock_timepoint, cert), [ops[1]], lock_timepoint)
+            return AddrInfo('p2sh' + suffix(lock_timepoint, cert, ops[1] == GRAVE_2_SH), [ops[1]], lock_timepoint)
 
     if len(ops) >= 1 and \
             IsOp(ops[0], OP_RETURN):
@@ -125,7 +153,7 @@ def GetAddressInfo(scriptPubKey):
             next_pubkey = ops[i]
             assert_equal(len(next_pubkey), 33)
             pkh_list.append(hash160(next_pubkey))
-        return AddrInfo('multisig {} of {}'.format(M, N) + suffix(lock_timepoint, cert), pkh_list, lock_timepoint)
+        return AddrInfo('multisig {} of {}'.format(M, N) + suffix(lock_timepoint, cert, False), pkh_list, lock_timepoint)
 
     if len(ops) == 18 and \
             IsOp(ops[0], OP_DUP) and \
@@ -299,6 +327,7 @@ class CVrfInput(object):
         self.nSequence = nSequence
         self.i = i                    # number of input in this transaction
         self.is_coinbase = is_coinbase
+        self.is_taxfree_cert = False
         self.prev_out = CVrfOutput(n, amount, scriptPubKey)
         if is_coinbase:
             self.prev_out.addr_details = 'coinbase'
@@ -317,7 +346,8 @@ class CVrfOutput(object):
         self.cert = None
         self.time = None
         if self.scriptPubKey is not None:
-            self.addr_details = address_details(self.scriptPubKey)
+            self.addr_info = GetAddressInfo(scriptPubKey)
+            self.addr_details = address_details(self.addr_info)
 
     def __repr__(self):
         return 'output {}: amount: {}, scriptPubKey: {}, spent: {}, {}'.format(self.n, self.amount, bytes_to_hex_str(self.scriptPubKey), self.spent, self.addr_details)
@@ -391,13 +421,17 @@ def fill_input(input):
     assert ((input.txid == '' or input.n == -1) == input.is_coinbase)
     if input.is_coinbase:
         return
+    if input.txid == '0' * 64:
+        input.is_taxfree_cert = True
+        return
     tx_parent = call_func('getrawtransaction', [input.txid, True])
     Verify(tx_parent is not None, 'parent tx for input {} was not found'.format(input.txid))
     Verify(input.n < len(tx_parent['vout']), 'invalid input {}:{}: index is out of range ({})'.format(input.txid, input.n, len(tx_parent['vout'])))
     vout = tx_parent['vout'][input.n]
     input.prev_out.amount = satoshi_round(str(vout['value']))
     input.prev_out.scriptPubKey = hex_str_to_bytes(vout['scriptPubKey']['hex'])
-    input.prev_out.addr_details  = address_details(input.prev_out.scriptPubKey)
+    input.prev_out.addr_info = GetAddressInfo(input.prev_out.scriptPubKey)
+    input.prev_out.addr_details  = address_details(input.prev_out.addr_info)
     assert_equal(input.n, vout['n'])
     txout = call_func('gettxout', [input.txid, input.n, True])
     input.prev_out.spent = txout is None
@@ -405,9 +439,8 @@ def fill_input(input):
         input.prev_out.time = tx_parent['time']
 
 
-def address_details(scriptPubKey):
-    ai = GetAddressInfo(scriptPubKey)
-    Verify(ai.addr_type != 'other', 'unknown tx type, scriptPubKey: {}'.format(bytes_to_hex_str(scriptPubKey)))
+def address_details(ai):
+    Verify(ai.addr_type != 'other', 'unknown tx type')
     if 'p2pkh_locked' in ai.addr_type:
         return 'address: {} ({}, {})'.format(AddressFromPubkeyHash(ai.addresses[0], TESTNET), ai.addr_type, time_str(ai.lock_timepoint))
     elif 'p2pkh' in ai.addr_type:
@@ -439,19 +472,25 @@ def address_details(scriptPubKey):
 
 
 def verify_input(input, this_ctransaction, vrftx, indent = 0):
-    indent2 = indent + 1
+    off1 = indent
+    off2 = indent + 1
+    off3 = indent + 2
     if input.is_coinbase:
-        print(' ' * indent * 2 + 'Input coinbase:')
-        print(' ' * indent2 * 2 + 'nSequence: %08x' % (input.nSequence))
+        print(spaces(off1) + 'Input coinbase:')
+        print(spaces(off2) + 'nSequence: %08x' % (input.nSequence))
         return
-    print(' ' * indent * 2 + 'Input {}:{}:'.format(input.txid, input.n))
-    print(' ' * indent2 * 2 + '{}'.format(input.prev_out.addr_details))
-    print(' ' * indent2 * 2 + 'amount: {}'.format(input.prev_out.amount))
-    print(' ' * indent2 * 2 + 'scriptPubKey: {}'.format(bytes_to_hex_str(input.prev_out.scriptPubKey)))
-    print(' ' * indent2 * 2 + 'scriptSig: {}'.format(bytes_to_hex_str(input.scriptSig)))
-    print(' ' * indent2 * 2 + 'nSequence: %08x' % (input.nSequence))
-    print(' ' * indent2 * 2 + 'time: {} ({})'.format(input.prev_out.time, time_str(input.prev_out.time)))
-    print(' ' * indent2 * 2 + 'input is spent: {}'.format(input.prev_out.spent))
+    if input.is_taxfree_cert:
+        print(spaces(off1) + 'Input taxfree_cert:')
+        print(spaces(off2) + 'nSequence: %08x' % (input.nSequence))
+        return
+    print(spaces(off1) + 'Input {}:{}:'.format(input.txid, input.n))
+    print(spaces(off2) + '{}'.format(input.prev_out.addr_details))
+    print(spaces(off2) + 'amount: {}'.format(input.prev_out.amount))
+    print(spaces(off2) + 'scriptPubKey: {}'.format(bytes_to_hex_str(input.prev_out.scriptPubKey)))
+    print(spaces(off2) + 'scriptSig: {}'.format(bytes_to_hex_str(input.scriptSig)))
+    print(spaces(off2) + 'nSequence: %08x' % (input.nSequence))
+    print(spaces(off2) + 'time: {} ({})'.format(input.prev_out.time, time_str(input.prev_out.time)))
+    print(spaces(off2) + 'input is spent: {}'.format(input.prev_out.spent))
     addr_info = GetAddressInfo(input.prev_out.scriptPubKey)
     txtype = addr_info.addr_type
 
@@ -535,9 +574,9 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
             Verify(len(vrftx.cert_txs) == 0 or (len(vrftx.cert_txs) == 2 and vrftx.cert_txs[i].txid == cert_txid and
                                                 vrftx.cert_txs[i].outputs[0].n == cert_n), 'different certificates in moneybox inputs, must be the same')
             if len(vrftx.cert_txs) > 0:
-                print(' ' * indent2 * 2 + 'CERT{} {}:{} was checked earlier, skipping...'.format(i, cert_txid, cert_n))
+                print(spaces(off2) + 'CERT{} {}:{} was checked earlier, skipping...'.format(i, cert_txid, cert_n))
                 continue
-            print(' ' * indent2 * 2 + 'CERT{} {}:{} details:'.format(i, cert_txid, cert_n))
+            print(spaces(off2) + 'CERT{} {}:{} details:'.format(i, cert_txid, cert_n))
             cert_tx = call_func('getrawtransaction', [cert_txid, True])
             Verify(cert_n < len(cert_tx['vout']), 'cert{}: index {} is out of range: {}'.format(i, cert_n, len(cert_tx['vout'])))
             cert_vout = cert_tx['vout'][cert_n]
@@ -552,7 +591,7 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
                 cert_next_input = CVrfInput(cert_vin['txid'], cert_vin['vout'], hex_str_to_bytes(cert_vin['scriptSig']['hex']), cert_vin['sequence'], j)
                 fill_input(cert_next_input)
                 cert_vrftx.inputs.append(cert_next_input)
-            verify_output(cert_output, cert_vrftx, indent2 + 1, True)
+            verify_output(cert_output, cert_vrftx, indent + 2, True)
         if vrftx.mint_calculated:
             this_cert = vrftx.cert_txs[1].outputs[0].cert
             Verify(this_cert.total_keys() == len(this_cert.children), f'corrupted ca3 certificate, len(keys) != N, got: keys: {len(this_cert.children)}, N: {this_cert.total_keys()}')
@@ -641,24 +680,23 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
                 reward_calc = 0
 
             max_fee = Decimal(10)
-            indent3 = indent2 + 1
-            print(' ' * indent2 * 2 + 'Minting 3.0 calculation:')
-            print(' ' * indent3 * 2 + f'RULES_VERSION: {RULES_VERSION}')
-            print(' ' * indent3 * 2 + 'red address: {}'.format(AddressFromPubkeyHash(user_pkhs[0], TESTNET)))
-            print(' ' * indent3 * 2 + 'user address: {}'.format(AddressFromPubkeyHash(white_pkh, TESTNET)))
-            print(' ' * indent3 * 2 + f'user_input_amount: {white_input_amount}')
-            print(' ' * indent3 * 2 + f'user_locked_output_amount: {white_locked_output_amount}')
-            print(' ' * indent3 * 2 + f'user_change_output_amount: {white_change_output_amount}')
-            print(' ' * indent3 * 2 + f'max_locked_user_amount: {max_locked_amount}')
-            print(' ' * indent3 * 2 + 'timepoint_of_max_locked_amount: {}, locked_period: {} ({}d, {}y)'.format(timepoint_of_max_locked_amount, locked_period, round(locked_period/3600/24, 4), round(locked_period/3600/24/365, 4)))
-            print(' ' * indent3 * 2 + f'other_output_amount_sum: {other_output_amount_sum}')
-            print(' ' * indent3 * 2 + f'percent: {percent} (or {percent * 100} %)')
-            print(' ' * indent3 * 2 + f'reward_calc: {reward_calc}')
-            print(' ' * indent3 * 2 + f'reward_got: {reward_got}')
-            print(' ' * indent3 * 2 + 'ratio calculated/got: {}'.format(round(reward_calc / reward_got, 4)))
-            print(' ' * indent3 * 2 + f'moneybox_input_amount: {moneybox_input_amount}')
-            print(' ' * indent3 * 2 + f'moneybox_output_amount: {moneybox_output_amount}')
-            print(' ' * indent3 * 2 + f'moneybox_fee: {moneybox_input_amount - moneybox_output_amount - reward_got}')
+            print(spaces(off2) + 'Minting 3.0 calculation:')
+            print(spaces(off3) + f'RULES_VERSION: {RULES_VERSION}')
+            print(spaces(off3) + 'red address: {}'.format(AddressFromPubkeyHash(user_pkhs[0], TESTNET)))
+            print(spaces(off3) + 'user address: {}'.format(AddressFromPubkeyHash(white_pkh, TESTNET)))
+            print(spaces(off3) + f'user_input_amount: {white_input_amount}')
+            print(spaces(off3) + f'user_locked_output_amount: {white_locked_output_amount}')
+            print(spaces(off3) + f'user_change_output_amount: {white_change_output_amount}')
+            print(spaces(off3) + f'max_locked_user_amount: {max_locked_amount}')
+            print(spaces(off3) + 'timepoint_of_max_locked_amount: {}, locked_period: {} ({}d, {}y)'.format(timepoint_of_max_locked_amount, locked_period, round(locked_period/3600/24, 4), round(locked_period/3600/24/365, 4)))
+            print(spaces(off3) + f'other_output_amount_sum: {other_output_amount_sum}')
+            print(spaces(off3) + f'percent: {percent} (or {percent * 100} %)')
+            print(spaces(off3) + f'reward_calc: {reward_calc}')
+            print(spaces(off3) + f'reward_got: {reward_got}')
+            print(spaces(off3) + 'ratio calculated/got: {}'.format(round(reward_calc / reward_got, 4)))
+            print(spaces(off3) + f'moneybox_input_amount: {moneybox_input_amount}')
+            print(spaces(off3) + f'moneybox_output_amount: {moneybox_output_amount}')
+            print(spaces(off3) + f'moneybox_fee: {moneybox_input_amount - moneybox_output_amount - reward_got}')
             Verify(reward_got <= reward_calc, 'robbery!')
             Verify(moneybox_input_amount - moneybox_output_amount <= reward_got + max_fee, 'moneybox robbery!')
         else:
@@ -669,7 +707,7 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
     elif txtype == 'funding' or txtype == 'ab_minting' or txtype == 'ab_minting_ex':
         ops = ExtractAllFromScript(input.scriptSig)
         Verify(len(ops) == 2 or len(ops) == 6, 'Input {} ({}:{}): invalid scriptSig len when spending {}: {}'.format(input.i, input.txid, input.n, txtype, len(ops)))
-        print(' ' * indent2 * 2 + 'keys count used to spend {}: {}'.format(txtype, 1 if len(ops) == 2 else 2))
+        print(spaces(off2) + 'keys count used to spend {}: {}'.format(txtype, 1 if len(ops) == 2 else 2))
         if len(ops) == 2:
             signature = ops[0]
             pubkey = ops[1]
@@ -704,7 +742,7 @@ def verify_input(input, this_ctransaction, vrftx, indent = 0):
                 Verify(verify_res, 'Input {} ({}:{}): invalid signature when spending {}: sig_hash: {}, pubkey ({}): {}, signature ({}): {}'.
                        format(input.i, input.txid, input.n, txtype, bytes_to_hex_str(sig_hash), len(pubkey), bytes_to_hex_str(pubkey), len(signature), bytes_to_hex_str(signature)))
     elif txtype == 'p2sh':
-        print(' ' * indent2 * 2 + 'skip check for spending p2sh output')
+        print(spaces(off2) + 'skip check for spending p2sh output')
     elif txtype == 'return':
         Verify(False, 'Forbidden to reference on return output type')
     else:
@@ -744,78 +782,79 @@ def fill_output(output, vrftx):
 
 
 def verify_output(output, vrftx, indent = 0, print_time = False):
-    indent2 = indent + 1
-    print('  ' * indent + 'Output {}:'.format(output.n))
-    print('  ' * indent2 + '{}'.format(output.addr_details))
+    off1 = indent
+    off2 = indent + 1
+    print(spaces(off1) + f'Output {output.n}:')
+    print(spaces(off2) + f'{output.addr_details}')
     if 'certificate' in output.addr_details:
-        verify_cert(output, vrftx, indent2 + 1)
+        verify_cert(output, vrftx, indent + 2)
         if output.spent:
-            print('  ' * indent2 + 'cert is revoked')
-    print('  ' * indent2 + 'amount: {}'.format(output.amount))
-    print('  ' * indent2 + 'scriptPubKey: {}'.format(bytes_to_hex_str(output.scriptPubKey)))
+            print(spaces(off2) + 'cert is revoked')
+    print(spaces(off2) + f'amount: {output.amount}')
+    print(spaces(off2) + f'scriptPubKey: {bytes_to_hex_str(output.scriptPubKey)}')
     if print_time:
-        print('  ' * indent2 + 'time: {} ({})'.format(vrftx.time, time_str(vrftx.time)))
-    print('  ' * indent2 + 'output is spent: {}'.format(output.spent))
+        print(spaces(off2) + f'time: {vrftx.time} ({time_str(vrftx.time)})')
+    print(spaces(off2) + f'output is spent: {output.spent}')
 
 
 def verify_cert(output, vrftx, indent = 0):
     (parts, rest) = ExtractPartFromScript(output.scriptPubKey, 3)
     if len(parts) != 3:
-        print('  ' * indent + f'invalid certificate structure, less than 3 operands, got: {len(parts)}')
+        print(spaces(indent) + f'invalid certificate structure, less than 3 operands, got: {len(parts)}')
         return
     block1 = parts[0]
     block2 = parts[1]
     block3 = parts[2]
     if len(block1) < 24 or len(block2) != 65 or not IsOp(block3, OP_2DROP):
-        print('  ' * indent + 'invalid certificate structure (step2)')
+        print(spaces(indent) + 'invalid certificate structure (step2)')
         return
     ai = GetAddressInfo(rest)
     txtype = ai.addr_type
     hash = ai.addresses[0]
     if txtype != 'p2pkh':
-        print('  ' * indent + 'invalid certificate structure, not p2pkh')
+        print(spaces(indent) + 'invalid certificate structure, not p2pkh')
         return
     if not any(PKHFromScript(inp.prev_out.scriptPubKey) == hash for inp in vrftx.inputs):
-        print('  ' * indent + 'output address {} not found in inputs'.format(AddressFromPubkeyHash(hash, TESTNET)))
+        print(spaces(indent) + 'output address {} not found in inputs'.format(AddressFromPubkeyHash(hash, TESTNET)))
     flags = struct.unpack("<I", block1[0:4])[0]
     output.cert = CVrfCert(output, flags)
     details = []
     block1_len_expected = 4
     for i in range(output.cert.total_keys()):
-        details.append('  ' * indent + 'child {} address: {}'.format(i, AddressFromPubkeyHash(block1[block1_len_expected:block1_len_expected + 20], TESTNET)))
+        details.append(spaces(indent) + 'child {} address: {}'.format(i, AddressFromPubkeyHash(block1[block1_len_expected:block1_len_expected + 20], TESTNET)))
         output.cert.children.append(block1[block1_len_expected:block1_len_expected + 20])
         block1_len_expected += 20
     if flags & HAS_DEVICE_KEY:
         block1_len_expected += 20
     if flags & HAS_BEN_KEY:
-        details.append('  ' * indent + 'ben address: {}'.format(AddressFromPubkeyHash(block1[block1_len_expected:block1_len_expected+20], TESTNET)))
+        details.append(spaces(indent) + 'ben address: {}'.format(AddressFromPubkeyHash(block1[block1_len_expected:block1_len_expected+20], TESTNET)))
         output.cert.ben_pkh = block1[block1_len_expected:block1_len_expected + 20]
         block1_len_expected += 20
     if flags & HAS_EXPIRATION_DATE:
         exdate = struct.unpack("<I", block1[block1_len_expected:block1_len_expected+4])[0]
-        details.append('  ' * indent + f'exp date: {exdate} ({time_str(exdate)})')
+        details.append(spaces(indent) + f'exp date: {exdate} ({time_str(exdate)})')
         output.cert.exp_date = exdate
         block1_len_expected += 4
     if flags & HAS_MINTING_LIMIT:
         limit = struct.unpack("<q", block1[block1_len_expected:block1_len_expected + 8])[0]
-        details.append('  ' * indent + f'minting limit: {ToCoins(limit)}')
+        details.append(spaces(indent) + f'minting limit: {ToCoins(limit)}')
         output.cert.minting_limit = limit
         block1_len_expected += 8
     if flags & HAS_DAILY_LIMIT:
         limit = struct.unpack("<q", block1[block1_len_expected:block1_len_expected + 8])[0]
-        details.append('  ' * indent + f'daily limit: {ToCoins(limit)}')
+        details.append(spaces(indent) + f'daily limit: {ToCoins(limit)}')
         output.cert.daily_limit = limit
         block1_len_expected += 8
     if flags & HAS_OTHER_DATA:
         block1_len_expected += 36
         output.cert.multisig_sh = block1[block1_len_expected:block1_len_expected + 20]
         if len(output.cert.multisig_sh) > 0:
-            details.append('  ' * indent + 'multisig address: {}'.format(AddressFromScriptHash(output.cert.multisig_sh, TESTNET)))
-    print('  ' * indent + 'flags: %08X (%s)' % (flags, flags_to_str(flags)))
+            details.append(spaces(indent) + 'multisig address: {}'.format(AddressFromScriptHash(output.cert.multisig_sh, TESTNET)))
+    print(spaces(indent) + 'flags: %08X (%s)' % (flags, flags_to_str(flags)))
     for d in details:
         print(d)
-    print('  ' * indent + 'keys: N = {} ({}), M = {} ({})'.format(output.cert.total_keys(), output.cert.total_keys_orig(), output.cert.required_keys(), output.cert.required_keys_orig()))
-    print('  ' * indent + f'is root cert: {output.cert.is_root_cert()}')
+    print(spaces(indent) + 'keys: N = {} ({}), M = {} ({})'.format(output.cert.total_keys(), output.cert.total_keys_orig(), output.cert.required_keys(), output.cert.required_keys_orig()))
+    print(spaces(indent) + f'is root cert: {output.cert.is_root_cert()}')
     Verify(len(block1) >= block1_len_expected, f'block1 invalid structure, expected: {block1_len_expected}, got: {len(block1)}')
     block1_hash = hash256(block1)
     recovered_pubkey = recover_public_key(block1_hash, block2, True)
@@ -876,12 +915,27 @@ this_block_stat = StatBC517()
 this_month_stat = StatBC517()
 
 
+def ignore_suffixes(str):
+    suffixes = ['_locked', ' certificate']
+    for suffix in suffixes:
+        if str.endswith(suffix):
+            str = str[:-len(suffix)]
+    return str
+
+
+def taxed_output(output, inputs):
+    if output.scriptPubKey in [GraveScript1(TESTNET), GraveScript2()]:
+        return False
+    output_type = ignore_suffixes(output.addr_info.addr_type)
+    for input in inputs:
+        if output_type == ignore_suffixes(
+                input.prev_out.addr_info.addr_type) and output.addr_info.addresses == input.prev_out.addr_info.addresses:
+            return False
+    return True
+
+
 def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, print_stat_517 = False, raw_tx = None):
     origin_raw_tx = raw_tx
-
-    # some tx:
-    #origin_raw_tx = '0200000002f743f57b1d62f68136b4eed6c50365f176e2e2d9d9a3ab2546e7307fb629776f02000000b0473044022051120563679aee53e0cfec9876fec7609ed613a436da670acb930fea49efb69402202f33400806ea6dca133a000bf0f613b066588f6a5727cd5975b85898997902b7012102e3ca9d4377d8afa97f6cda10d0b9398f18a22db0516e604f1c723cfc561d70b820901a1ed334bb6046b501ef0722b1943af800af7d7aa5eecc30e354b8bc6feb6c51205e306d312a9a992b9309e93d8d0df0f529fed7117145a4cce031f57caa80670d5101c0ffffffff1689e40d040b1a330ecd0ea11f7bca5d80a5a99fbf631c1989685a9514e0acac000000006a47304402202ae9bbfe8ebec7088eda24841316308fd385d183cf92909c6f8c4dc61c949f550220123d3d9551b396be9002205c533258da5d5468d7fc9cb29989a1e883fa62ec22012102e3ca9d4377d8afa97f6cda10d0b9398f18a22db0516e604f1c723cfc561d70b8ffffffff03004e7253000000001976a91415c9c6621ff988129c51ca6b46f396fd06631e4a88ac0a679200000000001976a9142dee4de7a3fffde26e0dc6f075b149eb51c1ade988ac50feb3320000000017a9140d37a6fe661c22c9a39e0404dc0306afefec75bd8700000000'
-
     tx = None
     if origin_raw_tx is not None:
         tx = call_func('decoderawtransaction', [origin_raw_tx])
@@ -912,6 +966,9 @@ def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, 
     for next_output in vrfTx.outputs:
         verify_output(next_output, vrfTx, indent)
     MIN_FEE = Decimal('0.00001')
+    taxfree_cert_inputs_cnt = len([input for input in vrfTx.inputs if input.is_taxfree_cert])
+    Verify(taxfree_cert_inputs_cnt in [0, 1], f'invalid taxfree_cert inputs count: {taxfree_cert_inputs_cnt}')
+    has_taxfree_cert = (taxfree_cert_inputs_cnt == 1)
     Verify(len(vrfTx.inputs) > 0, 'no inputs')
     Verify(len(vrfTx.outputs) > 0, 'no outputs')
     coinbase_inputs_cnt = sum([inp.is_coinbase == True for inp in vrfTx.inputs])
@@ -924,14 +981,30 @@ def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, 
     Verify(is_coinbase or moneybox_amount_in == 0 or moneybox_amount_in > moneybox_amount_out, 'moneybox_amount_in ({}) <= moneybox_amount_out ({})'.format(moneybox_amount_in, moneybox_amount_out))
     moneybox_spent = moneybox_amount_in - moneybox_amount_out
     fee = total_amount_in - total_amount_out
-    print('  ' * indent + f'Total input amount: {total_amount_in}')
-    print('  ' * indent + f'Total output amount: {total_amount_out}')
-    print('  ' * indent + f'Tx moneybox spent: {moneybox_spent}')
-    print('  ' * indent + 'Tx fee: {}, {} PLCU/KB'.format(fee if not is_coinbase else None, satoshi_round(fee * 1024 / vrfTx.size) if not is_coinbase and vrfTx.size > 0 else None))
-    print('  ' * indent + 'Tx time: {} ({})'.format(vrfTx.time, time_str(vrfTx.time)))
-    Verify(is_coinbase or block_fee is None, 'internal error: invalid usage of block_fee ({})'.format(block_fee))
-    Verify(is_coinbase or block_moneybox_spent is None, 'internal error: invalid usage of block_moneybox_spent ({})'.format(block_moneybox_spent))
+    print(spaces(indent) + f'Total input amount: {total_amount_in}')
+    print(spaces(indent) + f'Total output amount: {total_amount_out}')
+    print(spaces(indent) + f'Tx moneybox spent: {moneybox_spent}')
+    print(spaces(indent) + 'Tx fee: {}, {} PLCU/KB'.format(fee if not is_coinbase else None, satoshi_round(fee * 1024 / vrfTx.size) if not is_coinbase and vrfTx.size > 0 else None))
+    print(spaces(indent) + f'Tx time: {vrfTx.time} ({time_str(vrfTx.time)})')
+    print(spaces(indent) + f'Has taxfree_cert: {has_taxfree_cert}')
+    Verify(is_coinbase or block_fee is None, f'internal error: invalid usage of block_fee ({block_fee})')
+    Verify(is_coinbase or block_moneybox_spent is None, f'internal error: invalid usage of block_moneybox_spent ({block_moneybox_spent})')
     # Verify(is_coinbase or fee >= MIN_FEE, 'Too small fee: {}'.format(fee))
+    if not has_taxfree_cert and not is_coinbase:
+        taxed_amount_out = sum(output.amount for output in vrfTx.outputs if taxed_output(output, vrfTx.inputs))
+        burn1_amount_got = sum(output.amount for output in vrfTx.outputs if output.scriptPubKey == GraveScript1(TESTNET))
+        burn2_amount_got = sum(output.amount for output in vrfTx.outputs if output.scriptPubKey == GraveScript2())
+        (burn1_amount_calc, burn2_amount_calc) = GetBurnedValue(taxed_amount_out) if taxed_amount_out > 0 else (0,0)
+        print(spaces(indent) + f'Total taxed output amount: {taxed_amount_out}')
+        print(spaces(indent) + f'burn1_amount_calc: {burn1_amount_calc}')
+        print(spaces(indent) + f'burn1_amount_got: {burn1_amount_got}')
+        print(spaces(indent) + f'burn1 ratio got/calculated: {round(burn1_amount_got / burn1_amount_calc, 4) if burn1_amount_calc else None}')
+        print(spaces(indent) + f'burn2_amount_calc: {burn2_amount_calc}')
+        print(spaces(indent) + f'burn2_amount_got: {burn2_amount_got}')
+        print(spaces(indent) + f'burn2 ratio got/calculated: {round(burn2_amount_got / burn2_amount_calc, 4) if burn2_amount_calc else None}')
+        Verify(burn1_amount_got >= burn1_amount_calc, f'invalid burn1, calc: {burn1_amount_calc}, got: {burn1_amount_got}, taxed_amount_out: {taxed_amount_out}')
+        Verify(burn2_amount_got >= burn2_amount_calc, f'invalid burn2, calc: {burn2_amount_calc}, got: {burn2_amount_got}, taxed_amount_out: {taxed_amount_out}')
+
 
     # Statistics for BC-517:
     global this_block_stat
@@ -947,17 +1020,17 @@ def verify_tx(tx_id, indent = 0, block_fee = None, block_moneybox_spent = None, 
         local_stat = StatBC517(mint_tx_count, minted_amount, reg_tx_count, reg_amount)
         this_block_stat.add(local_stat)
         this_month_stat.add(local_stat)
-        print('  ' * indent + '----------------- This tx ---------------- This block ------------- This month --------')
-        print('  ' * indent + 'Mint tx count:    {:<25}{:<25}{:<25}'.format(local_stat.mint_tx_count, this_block_stat.mint_tx_count, this_month_stat.mint_tx_count))
-        print('  ' * indent + 'Minted amount:    {:<25}{:<25}{:<25}'.format(local_stat.minted_amount, this_block_stat.minted_amount, this_month_stat.minted_amount))
-        print('  ' * indent + 'Regular tx count: {:<25}{:<25}{:<25}'.format(local_stat.reg_tx_count, this_block_stat.reg_tx_count, this_month_stat.reg_tx_count))
-        print('  ' * indent + 'Transfer amount:  {:<25}{:<25}{:<25}'.format(local_stat.reg_amount, this_block_stat.reg_amount, this_month_stat.reg_amount))
-        print('  ' * indent + '---------------------------------------------------------------------------------------')
+        print(spaces(indent) + '----------------- This tx ---------------- This block ------------- This month --------')
+        print(spaces(indent) + 'Mint tx count:    {:<25}{:<25}{:<25}'.format(local_stat.mint_tx_count, this_block_stat.mint_tx_count, this_month_stat.mint_tx_count))
+        print(spaces(indent) + 'Minted amount:    {:<25}{:<25}{:<25}'.format(local_stat.minted_amount, this_block_stat.minted_amount, this_month_stat.minted_amount))
+        print(spaces(indent) + 'Regular tx count: {:<25}{:<25}{:<25}'.format(local_stat.reg_tx_count, this_block_stat.reg_tx_count, this_month_stat.reg_tx_count))
+        print(spaces(indent) + 'Transfer amount:  {:<25}{:<25}{:<25}'.format(local_stat.reg_amount, this_block_stat.reg_amount, this_month_stat.reg_amount))
+        print(spaces(indent) + '---------------------------------------------------------------------------------------')
 
     if is_coinbase:
-        print('  ' * indent + 'Block moneybox spent: {}'.format(block_moneybox_spent))
-        print('  ' * indent + 'Block fee: {}'.format(block_fee))
-        Verify(moneybox_amount_in == 0, 'non-zero moneybox_amount_in ({}) in coinbase tx'.format(moneybox_amount_in))
+        print(spaces(indent) + f'Block moneybox spent: {block_moneybox_spent}')
+        print(spaces(indent) + f'Block fee: {block_fee}')
+        Verify(moneybox_amount_in == 0, f'non-zero moneybox_amount_in ({moneybox_amount_in}) in coinbase tx')
         if block_moneybox_spent is not None:
             Verify(moneybox_amount_out == block_moneybox_spent, f'moneybox_amount_out ({moneybox_amount_out}) != block_moneybox_spent ({block_moneybox_spent})')
         if block_fee is not None:
@@ -985,7 +1058,7 @@ def walk_over_blocks(start_hash = None, forward = False, print_stat_517 = False)
         skipped = False
         for txid in next_block['tx'][1:]:
             if txid in exclude_transactions:
-                print('Skip tx {}'.format(txid))
+                print(f'Skip tx {txid}')
                 skipped = True
             else:
                 (tx_fee, tx_moneybox_spent, ignore_moneybox_spent) = verify_tx(txid, 1, print_stat_517=print_stat_517)
@@ -997,7 +1070,7 @@ def walk_over_blocks(start_hash = None, forward = False, print_stat_517 = False)
         else:
             print('Skip coinbase tx {} due to 1 or more skipped tx in the block {}'.format(next_block['tx'][0], next_hash))
         if nextblockhash_tag not in next_block:
-            print('Completed! No {} tag!'.format(nextblockhash_tag))
+            print(f'Completed! No {nextblockhash_tag} tag!')
             break
         prev_tx_month = this_tx_month
         next_hash = next_block[nextblockhash_tag]
@@ -1094,23 +1167,59 @@ def calc_flow_in_blocks(block_from, block_to, print_func = print):
 
 
 def determine_testnet():
-    block_hash_0 = call_func('getblockhash', [0])
-    BLOCKHASH0_TEST = '83b43792fc6255e24d471ce91e4d2a31de74280990ce8ff220c04227864d5377'
-    BLOCKHASH0_PROD = 'f596cf825f5833b7e30243d12c6164bd26db5fba05af08c498c886ff843158dd'
-    assert (block_hash_0 == BLOCKHASH0_TEST or block_hash_0 == BLOCKHASH0_PROD)
+    blockchaininfo = call_func('getblockchaininfo', [])
+    chain = blockchaininfo['chain']
+    Verify(chain == 'main' or chain == 'test', f'unknown chain: {chain}')
     global TESTNET
-    TESTNET = (block_hash_0 == BLOCKHASH0_TEST)
+    TESTNET = (chain == 'test')
     print(f'TESTNET: {TESTNET}')
 
 
 def main():
     determine_testnet()
-    # verify_tx(None, raw_tx='020000000491aaad965fdc252d9d6da95ddb41d9a1d113c47aa9ec12f0af24c54de0d4a2c30f000000b04730440220435c79eb4349a1ddea938f871f47d3056616305bb0e92e2902517fbd7afe5b34022045de1054fb530a0540aefb72b2e61e78c4c7ba008a729323575a8b9982e4e7ad012102e57c1391698b2c0774035ec4021764e57250ec3bf0a85a4516abe72b9c1ba7242055d2307d1c068994fe27add5ead1696973fdadcde7151c6d71cc280e062de8b800209afb67886aec416c728b0e74178218e7858f858e589a8eed0d8954323a038ea10001c0ffffffff9070a918f75c5904dc28c2c38cdcfb91fabb9d107dc434ad816b6dd181b5cb1809000000b047304402207caf571269858f7f79c65dc1f209e7c67af860d8b0e6a6d62f830be54b1f23a0022011f55d5f6d2c3b0e2794a076009201bb7583edc38590aa4389e447e4ab71c466012102e57c1391698b2c0774035ec4021764e57250ec3bf0a85a4516abe72b9c1ba7242055d2307d1c068994fe27add5ead1696973fdadcde7151c6d71cc280e062de8b800209afb67886aec416c728b0e74178218e7858f858e589a8eed0d8954323a038ea10001c0ffffffff23735f8dbd5f14ac2bb62a8a92ed039671b25fddc6c6445e89202f4a6e87ea47000000006a47304402205660d3401302ca52f7c20d198dfac9b611c2a5cf3dc91a7f98b8cd3eb1b2b76802204981b0d2404007a70e01039102ef2c8a7413eb413210f880b79ce4aad816e46e0121028485769eed8eb5f3ded11f722e20b5b289ce73c6f9e1b062d468fabbd6cb8ca6ffffffff6789836c02c93364fdf9ecfdfeb63e83d97608cbc532d3fe9c98ef13d8fc11fc000000006b483045022100e3c1e611bcf36fac46b790768af3db0ef66ee2afc621b85c49351cfaf339cf0c022077ea20562ce2e343f3f14466ba7432994f2343cd09f04e36bf03576315af73880121028485769eed8eb5f3ded11f722e20b5b289ce73c6f9e1b062d468fabbd6cb8ca6ffffffff1000e1f5050000000020042612af61b17576a914b619c6b71f149d266dfde7bf4eed3acf03c1d7de88acc00f780300000000200435dbad61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200455f7ad61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f78030000000020047513ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004952fae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004b54bae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004d567ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f7803000000002004f583ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200415a0ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200435bcae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200455d8ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f780300000000200475f4ae61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88acc00f78030000000020049510af61b17576a91434714338889bcd2a135dfc7b04de485241e3ed5d88ac00badb00000000001976a9147e8d5abc0c1910fd3fcbb74617cb6ca9bf784aca88ac00dd6d000000000017a9148296da5ca015c76181754a475b0677012cf63960873439e03c0200000017a9140d37a6fe661c22c9a39e0404dc0306afefec75bd8700000000')
-    # verify_tx('ec5c421228f95b2e51505c44e526465dd164ce1e5b5a2bbc7413dfc89b67e94e')
-    # return
+    args = sys.argv[1:]
+    txid = None
+    tx_hex = None
+    next_block_hash = None
+    forward = False
+    ARG_TXID='--txid='
+    ARG_TXHEX = '--tx='
+    ARG_FROM_BLOCK = '--fromblock='
+    ARG_FORWARD='--forward'
 
-    next_hash = None
-    walk_over_blocks(next_hash)
+    def is_hash256_hex(str):
+        return (is_hex_str(str) and len(str) == 64)
+
+    for arg in args:
+        if arg.startswith(ARG_TXID):
+            txid = arg[len(ARG_TXID):]
+            if not is_hash256_hex(txid):
+                print(f'Invalid txid: {txid}')
+                return
+        elif arg.startswith(ARG_TXHEX):
+            tx_hex = arg[len(ARG_TXHEX):]
+            if not is_hex_str(tx_hex) or len(tx_hex) < 64:
+                print(f'Invalid tx_hex: {tx_hex}')
+                return
+        elif arg.startswith(ARG_FROM_BLOCK):
+            next_block_hash = arg[len(ARG_FROM_BLOCK):]
+            if not is_hash256_hex(next_block_hash):
+                print(f'Invalid next_block_hash: {next_block_hash}')
+                return
+        elif arg == ARG_FORWARD:
+            forward = True
+        else:
+            print(f'Invalid argument: {arg}')
+            return
+    if (txid is not None) + (tx_hex is not None) + (next_block_hash is not None) > 1:
+        print('Invalid arguments combination: txid, tx_hex, fromblock: only one is allowed')
+        return
+    if txid:
+        verify_tx(txid)
+    elif tx_hex:
+        verify_tx(None, raw_tx=tx_hex)
+    else:
+        walk_over_blocks(next_block_hash, forward)
 
 
 if __name__ == '__main__':

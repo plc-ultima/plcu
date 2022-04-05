@@ -284,7 +284,7 @@ public:
         consensus.defaultFeeReductionBlock   = 29000;
         consensus.maxTotalAmount             = 5500000 * COIN;
 
-        consensus.holyMiningBlock            = 140000;
+        consensus.holyMiningBlock            = 152000;
 
         pchMessageStart[0] = 0xfc;
         pchMessageStart[1] = 0xd1;

@@ -61,6 +61,7 @@ def flag_to_str(flag):
         FREE_BEN: 'FREE_BEN',
         SILVER_HOOF: 'SILVER_HOOF',
         SUPER_TX: 'SUPER_TX',
+        ALLOW_MINING: 'ALLOW_MINING',
     }
     if flag in flags:
         return flags[flag]
@@ -86,12 +87,13 @@ def process_reject_message(test_node, reject_reason, accepted):
     test_node.reject_message = None
 
 
-def send_tx(node, test_node, tx, accepted, reject_reason=None, try_mine_in_block=True):
-    # for input in tx.vin:
-    #     txid_hex = '%064x' % (input.prevout.hash)
-    #     logger.debug(f'parent tx: {node.getrawtransaction(txid_hex, 1)}')
-    # tx_hex = bytes_to_hex_str(tx.serialize())
-    # logger.debug(f'this tx: {node.decoderawtransaction(tx_hex)}')
+def send_tx(node, test_node, tx, accepted, reject_reason=None, try_mine_in_block=True, verbose=False):
+    if verbose:
+        for input in tx.vin:
+            txid_hex = '%064x' % (input.prevout.hash)
+            logger.debug(f'parent tx: {node.getrawtransaction(txid_hex, 1)}')
+        tx_hex = bytes_to_hex_str(tx.serialize())
+        logger.debug(f'this tx: {node.decoderawtransaction(tx_hex)}')
 
     tx_message = msg_tx(tx)
     test_node.send_message(tx_message)
@@ -151,6 +153,7 @@ def generate_outpoints(node, count, amount, address):
         txid = node.sendtoaddress(address, amount)
         outpoints.append(COutPoint(int(txid, 16), find_output(node, txid, amount)))
         fee_sum += node.gettransaction(txid)['fee']
+        logger.debug(f'\t{txid}')
     return (outpoints, fee_sum)
 
 

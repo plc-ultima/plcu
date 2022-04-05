@@ -23,6 +23,7 @@ from .authproxy import AuthServiceProxy, JSONRPCException
 
 COIN = 100000000 # 1 PLCU in satoshis
 BASE_CB_AMOUNT = Decimal(5000)
+CB_AMOUNT_AFTER_BLOCK_100 = Decimal('0.005')
 DUST_OUTPUT_THRESHOLD = 54000
 DEFAULT_TX_CONFIRM_TARGET = 6
 GRAVE_ADDRESS_1_TESTNET = 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk'  # P2PKH
@@ -742,8 +743,8 @@ def BurnedAndChangeAmount(total_out_amount, dest_amount = 0, keep_sum = True):
     # burn = total_out_amount * percent / (1 + percent)
     change = ToCoins(total_out_amount * 100 / 103 - dest_amount)
     burn_total = total_out_amount * 3 / 103
-    burn1 = ToCoins(burn_total * 2 / 3)
-    burn2 = ToCoins(burn_total / 3)
+    burn1 = satoshi_round(ToCoins(burn_total * 2 / 3))
+    burn2 = satoshi_round(ToCoins(burn_total / 3))
     if keep_sum:
         if change + burn1 + burn2 < total_out_amount - dest_amount and change == 0:
             change += Decimal('0.00000001')
