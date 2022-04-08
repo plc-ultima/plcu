@@ -133,6 +133,7 @@ BASE_SCRIPTS= [
     'coinbase_subsidy.py',
     'total_emission.py',
     'sendtograve.py',
+    'free_tx.py',
     'minting.py',
     'minting.py --mintalltestcases',
 ]

@@ -1032,8 +1032,8 @@ uint256 sendTransaction(const std::string & strtx, const CAmount & nMaxRawTxFee,
         // push to local node and sync with wallets
         CValidationState state;
         bool fMissingInputs;
-        bool fLimitFree = true;
-        if (!AcceptToMemoryPool(mempool, state, std::move(tx), fLimitFree, &fMissingInputs, nullptr, false, nMaxRawTxFee, isDryrun)) {
+        bool is_limitFree = gArgs.GetBoolArg("-limitfreetx", DEFAULT_LIMIT_FREE_TX);
+        if (!AcceptToMemoryPool(mempool, state, std::move(tx), is_limitFree, &fMissingInputs, nullptr, false, nMaxRawTxFee, isDryrun)) {
             if (state.IsInvalid()) {
                 throw JSONRPCError(RPC_TRANSACTION_REJECTED, strprintf("%i: %s", state.GetRejectCode(), state.GetRejectReason()));
             } else {

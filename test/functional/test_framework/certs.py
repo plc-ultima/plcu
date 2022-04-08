@@ -157,6 +157,26 @@ def generate_outpoints(node, count, amount, address):
     return (outpoints, fee_sum)
 
 
+def compose_tx(input_utxos, input_key, dest_scripts_and_amounts):
+    tx3 = CTransaction()
+
+    for input_utxo in input_utxos:
+        tx3.vin.append(CTxIn(input_utxo, GetP2PKHScript(hash160(input_key.get_pubkey())), 0xffffffff))
+
+    for dest_script in dest_scripts_and_amounts:
+        amount = dest_scripts_and_amounts[dest_script]
+        tx3.vout.append(CTxOut(ToSatoshi(amount), dest_script))
+
+    for i in range(len(input_utxos)):
+        (sig_hash, err) = SignatureHash(CScript(tx3.vin[i].scriptSig), tx3, i, SIGHASH_ALL)
+        assert (err is None)
+        signature = input_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        tx3.vin[i].scriptSig = CScript([signature, input_key.get_pubkey()])
+
+    tx3.rehash()
+    return tx3
+
+
 def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVICE_KEY | SILVER_HOOF,
                     child_key=None, prev_scriptpubkey=None, block1a=None, block2a=None, block1_hash=None, parent_key_for_block2=None):
     parent_pubkey_bin = parent_key.get_pubkey()

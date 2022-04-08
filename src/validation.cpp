@@ -5002,7 +5002,8 @@ bool LoadMempool(void)
             CValidationState state;
             if (nTime + nExpiryTimeout > nNow) {
                 LOCK(cs_main);
-                AcceptToMemoryPoolWithTime(chainparams, mempool, state, tx, true, nullptr, nTime, nullptr, false, 0, false);
+                bool is_limitFree = gArgs.GetBoolArg("-limitfreetx", DEFAULT_LIMIT_FREE_TX);
+                AcceptToMemoryPoolWithTime(chainparams, mempool, state, tx, is_limitFree, nullptr, nTime, nullptr, false, 0, false);
                 if (state.IsValid()) {
                     ++count;
                 } else {

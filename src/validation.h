@@ -47,6 +47,8 @@ struct LockPoints;
 
 /** Default for DEFAULT_WHITELISTRELAY. */
 static const bool DEFAULT_WHITELISTRELAY = true;
+/** Default for LIMIT_FREE_TX */
+static const bool DEFAULT_LIMIT_FREE_TX = true;
 /** Default for DEFAULT_WHITELISTFORCERELAY. */
 static const bool DEFAULT_WHITELISTFORCERELAY = true;
 /** Default for -minrelaytxfee, minimum relay fee for transactions */
