@@ -167,6 +167,7 @@ class MiningCertTest(BitcoinTestFramework):
         node0 = self.nodes[0]
         node1 = self.nodes[1]
         txid = node0.sendtoaddress(node1.getnewaddress(), 1)
+        verify_tx_sent(node0, txid)
         node0.generate(1)
         self.sync_all()
         self.test_node.sync_with_ping()
@@ -238,6 +239,7 @@ class MiningCertTest(BitcoinTestFramework):
 
         # And now ensure super-tx will work correctly with the same cert containing both flags:
         txid = node0.sendtoaddress(node1.getnewaddress(), 100)
+        verify_tx_sent(node0, txid)
         tx = node0.getrawtransaction(txid, 1)
         assert_equal(len(tx['vout']), 2)
         assert_raises(RuntimeError, find_output_by_address, node0, GRAVE_ADDRESS_1, None, tx)

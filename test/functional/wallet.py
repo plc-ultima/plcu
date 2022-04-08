@@ -73,7 +73,9 @@ class WalletTest(BitcoinTestFramework):
         self.log.info("test getmemoryinfo")
         memory_before = self.nodes[0].getmemoryinfo()
         txid1 = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), 11)
+        verify_tx_sent(self.nodes[0], txid1)
         mempool_txid = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), 10)
+        verify_tx_sent(self.nodes[0], mempool_txid)
         memory_after = self.nodes[0].getmemoryinfo()
         # assert(memory_before['locked']['used'] + 64 <= memory_after['locked']['used'])  # hz
 
@@ -163,6 +165,7 @@ class WalletTest(BitcoinTestFramework):
         fee_per_byte = Decimal('0.001') / 1000
         self.nodes[2].settxfee(fee_per_byte * 1000)
         txid = self.nodes[2].sendtoaddress(address, 10, "", "", False)
+        verify_tx_sent(self.nodes[2], txid)
         self.nodes[2].generate(1)
         self.sync_all([self.nodes[0:3]])
         fee = -(self.nodes[2].gettransaction(txid)['fee'])
@@ -172,6 +175,7 @@ class WalletTest(BitcoinTestFramework):
         # Send 10 PLCU with subtract fee from amount
         self.log.info(f'self.nodes[2].getbalance: {self.nodes[2].getbalance()}')
         txid = self.nodes[2].sendtoaddress(address, 10, "", "", True)
+        verify_tx_sent(self.nodes[2], txid)
         txraw = self.nodes[2].getrawtransaction(txid, 1)
         burn1_out_ind = find_output_by_address(None, GRAVE_ADDRESS_1, tx_raw=txraw)
         burn2_out_ind = find_output_by_address(None, GRAVE_ADDRESS_2, tx_raw=txraw)
@@ -186,6 +190,7 @@ class WalletTest(BitcoinTestFramework):
 
         # Sendmany 10 PLCU
         txid = self.nodes[2].sendmany('from1', {address: 10}, 0, "", [])
+        verify_tx_sent(self.nodes[2], txid)
         self.nodes[2].generate(1)
         self.sync_all([self.nodes[0:3]])
         node_0_bal += Decimal('10')
@@ -195,6 +200,7 @@ class WalletTest(BitcoinTestFramework):
 
         # Sendmany 10 PLCU with subtract fee from amount
         txid = self.nodes[2].sendmany('from1', {address: 10}, 0, "", [address])
+        verify_tx_sent(self.nodes[2], txid)
         self.nodes[2].generate(1)
         self.sync_all([self.nodes[0:3]])
         node_2_bal -= Decimal('10')
@@ -207,7 +213,9 @@ class WalletTest(BitcoinTestFramework):
         # node (nodes[3]) and ask nodes[0] to rebroadcast.
         # EXPECT: nodes[3] should have those transactions in its mempool.
         txid1 = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[0], txid1)
         txid2 = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[1], txid2)
         sync_mempools(self.nodes[0:2])
 
         self.start_node(3)
@@ -301,17 +309,20 @@ class WalletTest(BitcoinTestFramework):
         amount_str = '2'
         amount = Decimal(amount_str)
         txId  = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), amount_str)
+        verify_tx_sent(self.nodes[0], txId)
         txObj = self.nodes[0].gettransaction(txId)
         assert_equal(-txObj['amount'], amount + sum(GetBurnedValue(amount))) # node returns here (amount + burned), not pure amount
 
         amount_str = '0.001'
         amount = Decimal(amount_str)
         txId  = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), amount_str)
+        verify_tx_sent(self.nodes[0], txId)
         txObj = self.nodes[0].gettransaction(txId)
         assert_equal(-txObj['amount'], amount + sum(GetBurnedValue(amount))) # node returns here (amount + burned), not pure amount
 
         #check if JSON parser can handle scientific notation in strings
         txId  = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), "1e-3")
+        verify_tx_sent(self.nodes[0], txId)
         txObj = self.nodes[0].gettransaction(txId)
         assert_equal(-txObj['amount'], amount + sum(GetBurnedValue(amount))) # node returns here (amount + burned), not pure amount
 
@@ -325,6 +336,7 @@ class WalletTest(BitcoinTestFramework):
         # 1. Send some coins to generate new UTXO
         address_to_import = self.nodes[2].getnewaddress()
         txid = self.nodes[0].sendtoaddress(address_to_import, 1)
+        verify_tx_sent(self.nodes[0], txid)
         self.nodes[0].generate(1)
         self.sync_all([self.nodes[0:3]])
 
@@ -411,6 +423,7 @@ class WalletTest(BitcoinTestFramework):
         # Get all non-zero utxos together
         chain_addrs = [self.nodes[0].getnewaddress(), self.nodes[0].getnewaddress()]
         singletxid = self.nodes[0].sendtoaddress(chain_addrs[0], self.nodes[0].getbalance(), "", "", True)
+        verify_tx_sent(self.nodes[0], singletxid)
         self.nodes[0].generate(1)
         node0_balance = self.nodes[0].getbalance()
         # Split into two chains
@@ -433,6 +446,7 @@ class WalletTest(BitcoinTestFramework):
         txid_list = []
         for i in range(chainlimit*2):
             txid_list.append(self.nodes[0].sendtoaddress(sending_addr, Decimal('0.01')))
+        [verify_tx_sent(self.nodes[0], txid) for txid in txid_list]
         assert_equal(self.nodes[0].getmempoolinfo()['size'], chainlimit*2)
         assert_equal(len(txid_list), chainlimit*2)
 

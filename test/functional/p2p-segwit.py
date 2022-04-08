@@ -1677,7 +1677,9 @@ class SegWitTest(BitcoinTestFramework):
         # Workaround:
         # Can either change the tip, or change the mempool and wait 5 seconds
         # to trigger a recomputation of getblocktemplate.
-        txid = int(self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1), 16)
+        txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[0], txid)
+        txid = int(txid, 16)
         # Using mocktime lets us avoid sleep()
         sync_mempools(self.nodes)
         self.nodes[0].setmocktime(int(time.time())+10)

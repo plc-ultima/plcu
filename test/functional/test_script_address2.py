@@ -39,6 +39,7 @@ class ScriptAddress2Test(BitcoinTestFramework):
 
         # Send to a new multisig address
         txid = self.nodes[1].sendtoaddress(multisig_addr, 1)
+        verify_tx_sent(self.nodes[1], txid)
         blocks = self.nodes[1].generate(3)
         self.sync_all()
         tx = self.nodes[2].getrawtransaction(txid, 1)
@@ -70,6 +71,7 @@ class ScriptAddress2Test(BitcoinTestFramework):
         assert_equal(multisig_addr_new, "U2xG1RnHeXPF3qhT685TXpfPSWCeVitX5pNzo")
 
         txid = self.nodes[1].sendtoaddress(multisig_addr_new, 1)
+        verify_tx_sent(self.nodes[1], txid)
         blocks = self.nodes[1].generate(1)
         self.sync_all()
         tx = self.nodes[2].getrawtransaction(txid, 1)

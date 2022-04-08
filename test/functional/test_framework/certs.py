@@ -151,6 +151,7 @@ def generate_outpoints(node, count, amount, address):
     fee_sum = 0
     for i in range(count):
         txid = node.sendtoaddress(address, amount)
+        verify_tx_sent(node, txid)
         outpoints.append(COutPoint(int(txid, 16), find_output(node, txid, amount)))
         fee_sum += node.gettransaction(txid)['fee']
         logger.debug(f'\t{txid}')

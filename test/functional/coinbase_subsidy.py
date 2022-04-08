@@ -97,6 +97,7 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         self.log.debug(f'amount: {amount}, fee: {fee}, burn1: {burn1}, burn2: {burn2}, change: {change}')
         for i in range(40):
             txid = self.nodes[0].sendtoaddress(AddressFromPubkeyHash(self.my_pkh), amount)
+            verify_tx_sent(self.nodes[0], txid)
             self.outpoints.append(COutPoint(int(txid, 16), find_output(self.nodes[0], txid, amount)))
 
 

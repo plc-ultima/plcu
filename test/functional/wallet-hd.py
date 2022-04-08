@@ -53,9 +53,11 @@ class WalletHDTest(BitcoinTestFramework):
             hd_info = self.nodes[1].validateaddress(hd_add)
             assert_equal(hd_info["hdkeypath"], "m/0'/0'/"+str(i+1)+"'")
             assert_equal(hd_info["hdmasterkeyid"], masterkeyid)
-            self.nodes[0].sendtoaddress(hd_add, 1)
+            txid = self.nodes[0].sendtoaddress(hd_add, 1)
+            verify_tx_sent(self.nodes[0], txid)
             self.nodes[0].generate(1)
         txid = self.nodes[0].sendtoaddress(non_hd_add, 1)
+        verify_tx_sent(self.nodes[0], txid)
         assert_in(txid, self.nodes[0].getrawmempool())
         self.nodes[0].generate(1)
 
@@ -94,6 +96,7 @@ class WalletHDTest(BitcoinTestFramework):
 
         # send a tx and make sure its using the internal chain for the changeoutput (with changeToNewAddress == False)
         txid = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[1], txid)
         outs = self.nodes[1].decoderawtransaction(self.nodes[1].gettransaction(txid)['hex'])['vout']
         keypath = ""
         for out in outs:
@@ -103,6 +106,7 @@ class WalletHDTest(BitcoinTestFramework):
 
         # send a tx and make sure its using the internal chain for the changeoutput (with changeToNewAddress == True)
         txid = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1, '', '', False, False, DEFAULT_TX_CONFIRM_TARGET, 'UNSET', True)
+        verify_tx_sent(self.nodes[1], txid)
         outs = self.nodes[1].decoderawtransaction(self.nodes[1].gettransaction(txid)['hex'])['vout']
         keypath = ""
         for out in outs:

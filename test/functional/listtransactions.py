@@ -29,6 +29,7 @@ class ListTransactionsTest(BitcoinTestFramework):
         # Simple send, 0 to 1:
         address = self.nodes[1].getnewaddress()
         txid = self.nodes[0].sendtoaddress(address, 0.1)
+        verify_tx_sent(self.nodes[0], txid)
         self.sync_all()
         assert_array_result(self.nodes[0].listtransactions(),
                            {"txid":txid, "address":address},
@@ -49,6 +50,7 @@ class ListTransactionsTest(BitcoinTestFramework):
         # send-to-self:
         address = self.nodes[0].getnewaddress()
         txid = self.nodes[0].sendtoaddress(address, 0.2)
+        verify_tx_sent(self.nodes[0], txid)
         assert_array_result(self.nodes[0].listtransactions(),
                            {"txid":txid, "address":address, "category":"send"},
                            {"amount":Decimal("-0.2")})
@@ -62,6 +64,7 @@ class ListTransactionsTest(BitcoinTestFramework):
                     self.nodes[0].getaccountaddress("from1") : 0.33,
                     self.nodes[1].getaccountaddress("toself") : 0.44 }
         txid = self.nodes[1].sendmany("", send_to)
+        verify_tx_sent(self.nodes[1], txid)
         self.sync_all()
         assert_array_result(self.nodes[1].listtransactions(),
                            {"category":"send","amount":Decimal("-0.11")},
@@ -91,6 +94,7 @@ class ListTransactionsTest(BitcoinTestFramework):
         multisig = self.nodes[1].createmultisig(1, [self.nodes[1].getnewaddress()])
         self.nodes[0].importaddress(multisig["redeemScript"], "watchonly", False, True)
         txid = self.nodes[1].sendtoaddress(multisig["address"], 0.1)
+        verify_tx_sent(self.nodes[1], txid)
         self.nodes[1].generate(1)
         self.sync_all()
         assert(len(self.nodes[0].listtransactions("watchonly", 100, 0, False)) == 0)
@@ -122,6 +126,7 @@ class ListTransactionsTest(BitcoinTestFramework):
 
         # 1. Chain a few transactions that don't opt-in.
         txid_1 = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[0], txid_1)
         assert(not is_opt_in(self.nodes[0], txid_1))
         assert_array_result(self.nodes[0].listtransactions(), {"txid": txid_1}, {"bip125-replaceable":"no"})
         sync_mempools(self.nodes)

@@ -593,8 +593,11 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
         fLastTemplateSupportsSegwit = fSupportsSegwit;
 
         // Create new block
-        static CScript scriptDummy = GetScriptForDestination(CScript() << OP_TRUE);
-        pblocktemplate = BlockAssembler(*pwallet, Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
+        // static CScript scriptDummy = GetScriptForDestination(CScript() << OP_TRUE);
+        std::shared_ptr<CReserveScript> coinbase_script;
+        pwallet->GetScriptForMining(coinbase_script);
+
+        pblocktemplate = BlockAssembler(*pwallet, Params()).CreateNewBlock(coinbase_script->subsidyDestination, fSupportsSegwit);
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
 
@@ -739,6 +742,13 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     else
     {
         throw JSONRPCError(RPC_MISC_ERROR, "Bad coinbase transaction");
+    }
+
+    // coinbasetxn
+    {
+        UniValue data(UniValue::VOBJ);
+        data.push_back(Pair("data", EncodeHexTx(*pblock->vtx[0].get(), RPCSerializationFlags())));
+        result.push_back(Pair("coinbasetxn", data));
     }
 
     result.push_back(Pair("longpollid", chainActive.Tip()->GetBlockHash().GetHex() + i64tostr(nTransactionsUpdatedLast)));

@@ -239,6 +239,7 @@ class ImportMultiTest (BitcoinTestFramework):
         multi_sig_script = self.nodes[0].createmultisig(2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(multi_sig_script['address'], 10.00)
+        verify_tx_sent(self.nodes[1], transactionid)
         self.nodes[1].generate(1)
         timestamp = self.nodes[1].getblock(self.nodes[1].getbestblockhash())['mediantime']
         transaction = self.nodes[1].gettransaction(transactionid)
@@ -267,6 +268,7 @@ class ImportMultiTest (BitcoinTestFramework):
         multi_sig_script = self.nodes[0].createmultisig(2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(multi_sig_script['address'], 10.00)
+        verify_tx_sent(self.nodes[1], transactionid)
         self.nodes[1].generate(1)
         timestamp = self.nodes[1].getblock(self.nodes[1].getbestblockhash())['mediantime']
         transaction = self.nodes[1].gettransaction(transactionid)
@@ -295,6 +297,7 @@ class ImportMultiTest (BitcoinTestFramework):
         multi_sig_script = self.nodes[0].createmultisig(2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(multi_sig_script['address'], 10.00)
+        verify_tx_sent(self.nodes[1], transactionid)
         self.nodes[1].generate(1)
         timestamp = self.nodes[1].getblock(self.nodes[1].getbestblockhash())['mediantime']
         transaction = self.nodes[1].gettransaction(transactionid)
@@ -323,6 +326,7 @@ class ImportMultiTest (BitcoinTestFramework):
         multi_sig_script = self.nodes[0].createmultisig(2, [sig_address_1['address'], sig_address_2['address'], sig_address_3['pubkey']])
         self.nodes[1].generate(100)
         transactionid = self.nodes[1].sendtoaddress(multi_sig_script['address'], 10.00)
+        verify_tx_sent(self.nodes[1], transactionid)
         self.nodes[1].generate(1)
         timestamp = self.nodes[1].getblock(self.nodes[1].getbestblockhash())['mediantime']
         transaction = self.nodes[1].gettransaction(transactionid)

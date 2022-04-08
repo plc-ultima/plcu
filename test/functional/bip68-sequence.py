@@ -55,7 +55,8 @@ class BIP68Test(BitcoinTestFramework):
     def test_disable_flag(self):
         # Create some unconfirmed inputs
         new_addr = self.nodes[0].getnewaddress()
-        self.nodes[0].sendtoaddress(new_addr, 2) # send 2 PLCU
+        txid = self.nodes[0].sendtoaddress(new_addr, 2) # send 2 PLCU
+        verify_tx_sent(self.nodes[0], txid)
 
         utxos = self.nodes[0].listunspent(0, 0)
         assert(len(utxos) > 0)
@@ -125,7 +126,8 @@ class BIP68Test(BitcoinTestFramework):
                 outputs[addresses[i]] = value
                 out_sum += value
             self.log.debug(f'test_sequence_lock_confirmed_inputs, balance: {self.nodes[0].getbalance()}, num_outputs: {num_outputs}, unspent: {len(self.nodes[0].listunspent())}, out_sum: {out_sum}, outputs: {outputs}')
-            self.nodes[0].sendmany("", outputs)
+            txid = self.nodes[0].sendmany("", outputs)
+            verify_tx_sent(self.nodes[0], txid)
             self.nodes[0].generate(1)
 
         utxos = self.nodes[0].listunspent()
@@ -212,6 +214,7 @@ class BIP68Test(BitcoinTestFramework):
 
         # Create a mempool tx.
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 2)
+        verify_tx_sent(self.nodes[0], txid)
         tx1 = FromHex(CTransaction(), self.nodes[0].getrawtransaction(txid))
         tx1.rehash()
 
@@ -346,6 +349,7 @@ class BIP68Test(BitcoinTestFramework):
     def test_bip68_not_consensus(self):
         assert(get_bip9_status(self.nodes[0], 'csv')['status'] != 'active')
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 2)
+        verify_tx_sent(self.nodes[0], txid)
 
         tx1 = FromHex(CTransaction(), self.nodes[0].getrawtransaction(txid))
         tx1.rehash()
@@ -409,8 +413,10 @@ class BIP68Test(BitcoinTestFramework):
         inputs = [ ]
         outputs = { self.nodes[1].getnewaddress() : 1.0 }
         rawtx = self.nodes[1].createrawtransaction(inputs, outputs)
-        rawtxfund = self.nodes[1].fundrawtransaction(rawtx)['hex']
-        tx = FromHex(CTransaction(), rawtxfund)
+        rawtxfund = self.nodes[1].fundrawtransaction(rawtx)
+        assert_greater_than(rawtxfund['fee'], 0)
+        rawtxfundhex = rawtxfund['hex']
+        tx = FromHex(CTransaction(), rawtxfundhex)
         tx.nVersion = 2
         tx_signed = self.nodes[1].signrawtransaction(ToHex(tx))["hex"]
         tx_id = self.nodes[1].sendrawtransaction(tx_signed)

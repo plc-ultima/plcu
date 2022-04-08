@@ -5,7 +5,7 @@
 """Test resendwallettransactions RPC."""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, assert_raises_rpc_error
+from test_framework.util import assert_equal, assert_raises_rpc_error, verify_tx_sent
 
 class ResendWalletTransactionsTest(BitcoinTestFramework):
     def set_test_params(self):
@@ -23,6 +23,7 @@ class ResendWalletTransactionsTest(BitcoinTestFramework):
 
         # Should return an array with the unconfirmed wallet transaction.
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[0], txid)
         assert_equal(self.nodes[0].resendwallettransactions(), [txid])
 
 if __name__ == '__main__':

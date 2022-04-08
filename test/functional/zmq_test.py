@@ -8,10 +8,7 @@ import os
 import struct
 
 from test_framework.test_framework import BitcoinTestFramework, SkipTest
-from test_framework.util import (assert_equal,
-                                 bytes_to_hex_str,
-                                 reverse
-                                )
+from test_framework.util import *
 from test_framework.script import hash256
 
 class ZMQTest (BitcoinTestFramework):
@@ -129,6 +126,7 @@ class ZMQTest (BitcoinTestFramework):
         self.log.info("Wait for tx from second node")
         # test tx from a second node
         hashRPC = self.nodes[1].sendtoaddress(self.nodes[0].getnewaddress(), 1.0)
+        verify_tx_sent(self.nodes[1], hashRPC)
         self.sync_all()
 
         # now we should receive a zmq msg because the tx was broadcast

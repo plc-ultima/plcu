@@ -20,7 +20,7 @@ happened previously.
 """
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (assert_raises_rpc_error, connect_nodes, sync_blocks, assert_equal, set_node_times)
+from test_framework.util import *
 
 import collections
 import enum
@@ -138,6 +138,7 @@ class ImportRescanTest(BitcoinTestFramework):
             variant.key = self.nodes[1].dumpprivkey(variant.address["address"])
             variant.initial_amount = 10 - (i + 1) / 4.0
             variant.initial_txid = self.nodes[0].sendtoaddress(variant.address["address"], variant.initial_amount)
+            verify_tx_sent(self.nodes[0], variant.initial_txid)
 
         # Generate a block containing the initial transactions, then another
         # block further in the future (past the rescan window).
@@ -169,6 +170,7 @@ class ImportRescanTest(BitcoinTestFramework):
         for i, variant in enumerate(IMPORT_VARIANTS):
             variant.sent_amount = 10 - (2 * i + 1) / 8.0
             variant.sent_txid = self.nodes[0].sendtoaddress(variant.address["address"], variant.sent_amount)
+            verify_tx_sent(self.nodes[0], variant.sent_txid)
 
         # Generate a block containing the new transactions.
         self.nodes[0].generate(1)

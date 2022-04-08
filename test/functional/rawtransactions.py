@@ -32,9 +32,12 @@ class RawTransactionsTest(BitcoinTestFramework):
         self.sync_all()
         self.nodes[0].generate(101)
         self.sync_all()
-        self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(),1.5)
-        self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(),1.0)
-        self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(),5.0)
+        txid = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(),1.5)
+        verify_tx_sent(self.nodes[0], txid)
+        txid = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(),1.0)
+        verify_tx_sent(self.nodes[0], txid)
+        txid = self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(),5.0)
+        verify_tx_sent(self.nodes[0], txid)
         self.sync_all()
         self.nodes[0].generate(5)
         self.sync_all()
@@ -68,6 +71,7 @@ class RawTransactionsTest(BitcoinTestFramework):
 
         # send 1.2 PLCU to msig adr
         txId = self.nodes[0].sendtoaddress(mSigObj, 1.2)
+        verify_tx_sent(self.nodes[0], txId)
         self.sync_all()
         self.nodes[0].generate(1)
         self.sync_all()
@@ -88,6 +92,7 @@ class RawTransactionsTest(BitcoinTestFramework):
         mSigObjValid = self.nodes[2].validateaddress(mSigObj)
 
         txId = self.nodes[0].sendtoaddress(mSigObj, 2.2)
+        verify_tx_sent(self.nodes[0], txId)
         decTx = self.nodes[0].gettransaction(txId)
         rawTx = self.nodes[0].decoderawtransaction(decTx['hex'])
         self.sync_all()
@@ -136,6 +141,7 @@ class RawTransactionsTest(BitcoinTestFramework):
         mSigObjValid = self.nodes[2].validateaddress(mSigObj)
 
         txId = self.nodes[0].sendtoaddress(mSigObj, 2.2)
+        verify_tx_sent(self.nodes[0], txId)
         decTx = self.nodes[0].gettransaction(txId)
         rawTx2 = self.nodes[0].decoderawtransaction(decTx['hex'])
         self.sync_all()

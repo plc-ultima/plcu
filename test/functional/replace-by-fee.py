@@ -31,6 +31,7 @@ def make_utxo(node, amount, confirmed=True, scriptPubKey=CScript([1])):
 
     new_addr = node.getnewaddress()
     txid = node.sendtoaddress(new_addr, amount_to_take + fee)
+    verify_tx_sent(node, txid)
     tx1 = node.getrawtransaction(txid, 1)
     txid = int(txid, 16)
     i = None
@@ -659,6 +660,8 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         rawtx2 = self.nodes[0].createrawtransaction([], outs)
         frawtx2a = self.nodes[0].fundrawtransaction(rawtx2, {"replaceable": True})
         frawtx2b = self.nodes[0].fundrawtransaction(rawtx2, {"replaceable": False})
+        assert_greater_than(frawtx2a['fee'], 0)
+        assert_greater_than(frawtx2b['fee'], 0)
 
         json0  = self.nodes[0].decoderawtransaction(frawtx2a['hex'])
         json1  = self.nodes[0].decoderawtransaction(frawtx2b['hex'])

@@ -15,11 +15,8 @@
   been zapped.
 """
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (
-    assert_equal,
-    assert_raises_rpc_error,
-    wait_until,
-)
+from test_framework.util import *
+
 
 class ZapWalletTXesTest (BitcoinTestFramework):
     def set_test_params(self):
@@ -35,12 +32,14 @@ class ZapWalletTXesTest (BitcoinTestFramework):
 
         # This transaction will be confirmed
         txid1 = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 10)
+        verify_tx_sent(self.nodes[0], txid1)
 
         self.nodes[0].generate(1)
         self.sync_all()
 
         # This transaction will not be confirmed
         txid2 = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 20)
+        verify_tx_sent(self.nodes[0], txid2)
 
         # Confirmed and unconfirmed transactions are now in the wallet.
         assert_equal(self.nodes[0].gettransaction(txid1)['txid'], txid1)

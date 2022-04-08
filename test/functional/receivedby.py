@@ -38,6 +38,7 @@ class ReceivedByTest(BitcoinTestFramework):
         # Send from node 0 to 1
         addr = self.nodes[1].getnewaddress()
         txid = self.nodes[0].sendtoaddress(addr, 0.1)
+        verify_tx_sent(self.nodes[0], txid)
         self.sync_all()
 
         #Check not listed in listreceivedbyaddress because has 0 confirmations
@@ -70,6 +71,7 @@ class ReceivedByTest(BitcoinTestFramework):
         # Send from node 0 to 1
         addr = self.nodes[1].getnewaddress()
         txid = self.nodes[0].sendtoaddress(addr, 0.1)
+        verify_tx_sent(self.nodes[0], txid)
         self.sync_all()
 
         #Check balance is 0 because of 0 confirmations
@@ -101,6 +103,7 @@ class ReceivedByTest(BitcoinTestFramework):
         balance_by_account = self.nodes[1].getreceivedbyaccount(account)
 
         txid = self.nodes[0].sendtoaddress(addr, 0.1)
+        verify_tx_sent(self.nodes[0], txid)
         self.sync_all()
 
         # listreceivedbyaccount should return received_by_account_json because of 0 confirmations

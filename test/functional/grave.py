@@ -86,7 +86,7 @@ class GraveTest(BitcoinTestFramework):
     def check_sendtoaddress(self, node, address, amount, subtractfeefromamount=False, changeToNewAddress=False, changeExists=None):
         self.log.debug(f'check sendtoaddress: node: {self.nodes.index(node)}, balance: {node.getbalance()}, address: {address}, amount: {amount}, subtractfeefromamount: {subtractfeefromamount}, changeToNewAddress: {changeToNewAddress}')
         txid = node.sendtoaddress(address, amount, '', '', subtractfeefromamount, False, DEFAULT_TX_CONFIRM_TARGET, 'UNSET', changeToNewAddress)
-        assert_in(txid, node.getrawmempool())
+        verify_tx_sent(node, txid)
         txraw = node.getrawtransaction(txid, 1)
         self.log.debug(f'txraw: {txraw}')
         outputs_cnt = len(txraw['vout'])
@@ -138,7 +138,7 @@ class GraveTest(BitcoinTestFramework):
             amount_sum += addresses_and_amounts[addr]
         self.log.debug(f'check sendmany: node: {self.nodes.index(node)}, balance: {node.getbalance()}, amount_sum: {amount_sum}, addresses_and_amounts: {addresses_and_amounts}, changeToNewAddress: {changeToNewAddress}, subtractfeefrom: {subtractfeefrom}')
         txid = node.sendmany('', addresses_and_amounts, 1, '', subtractfeefrom, False, DEFAULT_TX_CONFIRM_TARGET, 'UNSET', changeToNewAddress)
-        assert_in(txid, node.getrawmempool())
+        verify_tx_sent(node, txid)
         txraw = node.getrawtransaction(txid, 1)
         self.log.debug(f'txraw: {txraw}')
         # print_tx_verbose(node, tx_json=txraw)
@@ -289,11 +289,16 @@ class GraveTest(BitcoinTestFramework):
                                 changeToNewAddress=changeToNewAddress, subtractfeefrom=[])
 
         # Ensure node allows to send coins to grave addresses:
-        node0.sendmany('', {GRAVE_ADDRESS_1: burn1})
-        node0.sendmany('', {GRAVE_ADDRESS_2: burn2})
-        node0.sendmany('', {GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
-        node0.sendtoaddress(GRAVE_ADDRESS_1, burn1)
-        node0.sendtoaddress(GRAVE_ADDRESS_2, burn2)
+        txid = node0.sendmany('', {GRAVE_ADDRESS_1: burn1})
+        verify_tx_sent(node0, txid)
+        txid = node0.sendmany('', {GRAVE_ADDRESS_2: burn2})
+        verify_tx_sent(node0, txid)
+        txid = node0.sendmany('', {GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
+        verify_tx_sent(node0, txid)
+        txid = node0.sendtoaddress(GRAVE_ADDRESS_1, burn1)
+        verify_tx_sent(node0, txid)
+        txid = node0.sendtoaddress(GRAVE_ADDRESS_2, burn2)
+        verify_tx_sent(node0, txid)
 
         # Generate utxos:
         (self.my_key1, self.my_pubkey1, self.my_pkh1, self.my_p2pkh_scriptpubkey1, self.my_p2pk_scriptpubkey1) = create_my_key()

@@ -60,6 +60,7 @@ class WalletAccountsTest(BitcoinTestFramework):
             subtractfeefrom=[common_address],
             minconf=1,
         )
+        verify_tx_sent(node, txid)
         tx_details = node.gettransaction(txid)
         fee = -tx_details['details'][0]['fee']
         # there should be 1 address group, with the previously

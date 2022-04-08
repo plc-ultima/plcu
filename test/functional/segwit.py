@@ -119,6 +119,7 @@ class SegWitTest(BitcoinTestFramework):
 
         self.log.info("Verify sigops are counted in GBT with pre-BIP141 rules before the fork")
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 10)
+        verify_tx_sent(self.nodes[0], txid)
         tmpl = self.nodes[0].getblocktemplate({})
         self.log.debug(f'tmpl: {tmpl}')
         assert(tmpl['sizelimit'] == 1000000)
@@ -238,6 +239,7 @@ class SegWitTest(BitcoinTestFramework):
 
         self.log.info("Verify sigops are counted in GBT with BIP141 rules after the fork")
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 10)
+        verify_tx_sent(self.nodes[0], txid)
         tmpl = self.nodes[0].getblocktemplate({'rules':['segwit']})
         self.log.debug(f'tmpl: {tmpl}')
         assert(tmpl['sizelimit'] >= 3999577)  # actual maximum size is lower due to minimum mandatory non-witness data

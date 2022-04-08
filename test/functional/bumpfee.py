@@ -52,7 +52,8 @@ class BumpFeeTest(BitcoinTestFramework):
         peer_node.generate(110)
         self.sync_all()
         for i in range(25):
-            peer_node.sendtoaddress(rbf_node_address, 0.1)
+            txid = peer_node.sendtoaddress(rbf_node_address, 0.1)
+            verify_tx_sent(peer_node, txid)
         self.sync_all()
         peer_node.generate(1)
         self.sync_all()

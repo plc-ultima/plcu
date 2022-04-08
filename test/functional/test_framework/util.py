@@ -795,3 +795,8 @@ def print_mempool_verbose(node, indent=0):
         print_tx_verbose(node, txid=txid, indent=indent+2)
         logger.debug(f'{" " * (indent+2)}---')
     logger.debug(f'{" " * indent}----- mempool')
+
+def verify_tx_sent(node, txid):
+    assert_in(txid, node.getrawmempool())
+    fee = -node.gettransaction(txid)['fee']
+    assert_greater_than(fee, 0)

@@ -63,6 +63,7 @@ class RESTTest (BitcoinTestFramework):
         assert_equal(self.nodes[0].getbalance(), BASE_CB_AMOUNT)
 
         txid = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), Decimal('0.1'))
+        verify_tx_sent(self.nodes[0], txid)
         self.sync_all()
         self.nodes[2].generate(1)
         self.sync_all()
@@ -148,6 +149,7 @@ class RESTTest (BitcoinTestFramework):
 
         # do a tx and don't sync
         txid = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 0.1)
+        verify_tx_sent(self.nodes[0], txid)
         json_string = http_get_call(url.hostname, url.port, '/rest/tx/'+txid+self.FORMAT_SEPARATOR+"json")
         json_obj = json.loads(json_string)
         vintx = json_obj['vin'][0]['txid'] # get the vin to later check for utxo (should be spent by then)
@@ -283,6 +285,7 @@ class RESTTest (BitcoinTestFramework):
         txs.append(self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), 11))
         txs.append(self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), 11))
         txs.append(self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), 11))
+        [verify_tx_sent(self.nodes[0], txid) for txid in txs]
         self.sync_all()
 
         # check that there are exactly 3 transactions in the TX memory pool before generating the block

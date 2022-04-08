@@ -13,11 +13,8 @@ Two nodes. Node1 is under test. Node0 is providing transactions and generating b
 import shutil
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (
-    assert_equal,
-    connect_nodes_bi,
-    sync_blocks,
-)
+from test_framework.util import *
+
 
 class KeypoolRestoreTest(BitcoinTestFramework):
     def set_test_params(self):
@@ -46,9 +43,11 @@ class KeypoolRestoreTest(BitcoinTestFramework):
 
         self.log.info("Send funds to wallet")
 
-        self.nodes[0].sendtoaddress(addr_oldpool, 10)
+        txid = self.nodes[0].sendtoaddress(addr_oldpool, 10)
+        verify_tx_sent(self.nodes[0], txid)
         self.nodes[0].generate(1)
-        self.nodes[0].sendtoaddress(addr_extpool, 5)
+        txid = self.nodes[0].sendtoaddress(addr_extpool, 5)
+        verify_tx_sent(self.nodes[0], txid)
         self.nodes[0].generate(1)
         sync_blocks(self.nodes)
 

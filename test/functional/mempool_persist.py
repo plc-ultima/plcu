@@ -50,7 +50,8 @@ class MempoolPersistTest(BitcoinTestFramework):
 
         self.log.debug("Send 5 transactions from node2 (to its own address)")
         for i in range(5):
-            self.nodes[2].sendtoaddress(self.nodes[2].getnewaddress(), Decimal("10"))
+            txid = self.nodes[2].sendtoaddress(self.nodes[2].getnewaddress(), Decimal("10"))
+            verify_tx_sent(self.nodes[2], txid)
         self.sync_all()
 
         self.log.debug("Verify that node0 and node1 have 5 transactions in their mempools")

@@ -66,7 +66,7 @@ class SendToGraveTest(BitcoinTestFramework):
         null_input = {'txid': '0000000000000000000000000000000000000000000000000000000000000000', 'vout': 0}
         addr1 = node0.getnewaddress()
         txid = node1.sendtoaddress(addr1, amount)
-        assert_in(txid, node1.getrawmempool())
+        verify_tx_sent(node1, txid)
         self.sync_all()
         if mine_block:
             node1.generate(1)
@@ -105,7 +105,7 @@ class SendToGraveTest(BitcoinTestFramework):
         balance_before = node0.getbalance('', 0)
         self.log.debug(f'check sendtoaddress: node: 0, balance: {balance_before}, address: {address}, amount: {amount}, subtractfeefromamount: {subtractfeefromamount}, valid_cert: {valid_cert}, height: {node0.getblockcount()}')
         txid = node0.sendtoaddress(address, amount, '', '', subtractfeefromamount)
-        assert_in(txid, node0.getrawmempool())
+        verify_tx_sent(node0, txid)
         txraw = node0.getrawtransaction(txid, 1)
         balance_after = node0.getbalance('', 0)
         self.log.debug(f'txraw: {txraw}, balance_after: {balance_after}')
@@ -125,16 +125,13 @@ class SendToGraveTest(BitcoinTestFramework):
         balance_before = node0.getbalance('', 0)
         self.log.debug(f'check sendmany: node: 0, balance: {balance_before}, amount_sum: {amount_sum}, addresses_and_amounts: {addresses_and_amounts}, subtractfeefrom: {subtractfeefrom}, valid_cert: {valid_cert}, height: {node0.getblockcount()}')
         txid = node0.sendmany('', addresses_and_amounts, 1, '', subtractfeefrom)
-        assert_in(txid, node0.getrawmempool())
+        verify_tx_sent(node0, txid)
         txraw = node0.getrawtransaction(txid, 1)
 
         self.log.debug(f'txraw: {txraw}')
         outputs_cnt = len(txraw['vout'])
         assert_greater_than_or_equal(outputs_cnt, len(addresses_and_amounts))  # dests (if no change)
         assert_greater_than_or_equal(len(addresses_and_amounts) + 1, outputs_cnt)  # dests + change
-        amount_sent_indexes_map = {}
-        amount_sent_indexes_arr = []
-        amount_sent_sum = 0
         for addr in addresses_and_amounts:
             amount_sent_index = find_output_by_address(node0, addr, tx_raw=txraw)
             assert_greater_than(amount_sent_index, -1)

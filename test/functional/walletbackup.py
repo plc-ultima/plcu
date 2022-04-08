@@ -52,7 +52,8 @@ class WalletBackupTest(BitcoinTestFramework):
         self.sync_all()
 
     def one_send(self, from_node, to_address, amount):
-        self.nodes[from_node].sendtoaddress(to_address, amount)
+        txid = self.nodes[from_node].sendtoaddress(to_address, amount)
+        verify_tx_sent(self.nodes[from_node], txid)
 
     def do_one_round(self):
         a0 = self.nodes[0].getnewaddress()

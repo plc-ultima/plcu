@@ -272,12 +272,14 @@ class CompactBlocksTest(BitcoinTestFramework):
             address = node.addwitnessaddress(address)
             value_to_send = node.getbalance()
             (_, _, rest) = BurnedAndChangeAmount(satoshi_round(value_to_send - Decimal('0.1')))
-            node.sendtoaddress(address, rest)
+            txid = node.sendtoaddress(address, rest)
+            verify_tx_sent(node, txid)
             node.generate(1)
 
         segwit_tx_generated = False
         for i in range(num_transactions):
             txid = node.sendtoaddress(address, amount_to_send)
+            verify_tx_sent(node, txid)
             hex_tx = node.gettransaction(txid)["hex"]
             tx = FromHex(CTransaction(), hex_tx)
             if not tx.wit.is_null():

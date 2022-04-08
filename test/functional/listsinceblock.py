@@ -24,6 +24,7 @@ class ListSinceBlockTest (BitcoinTestFramework):
 
     def test_no_blockhash(self):
         txid = self.nodes[2].sendtoaddress(self.nodes[0].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[2], txid)
         blockhash, = self.nodes[2].generate(1)
         self.sync_all()
 
@@ -87,6 +88,7 @@ class ListSinceBlockTest (BitcoinTestFramework):
 
         # send to nodes[0] from nodes[2]
         senttx = self.nodes[2].sendtoaddress(self.nodes[0].getnewaddress(), 1)
+        verify_tx_sent(self.nodes[2], senttx)
 
         # generate on both sides
         lastblockhash = self.nodes[1].generate(6)[5]

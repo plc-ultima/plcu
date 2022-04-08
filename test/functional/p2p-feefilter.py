@@ -54,6 +54,7 @@ class FeeFilterTest(BitcoinTestFramework):
         # Test that invs are received for all txs at feerate of 20 sat/byte
         node1.settxfee(Decimal("0.00200000"))
         txids = [node1.sendtoaddress(node1.getnewaddress(), 1) for x in range(3)]
+        [verify_tx_sent(node1, txid) for txid in txids]
         assert(allInvsMatch(txids, test_node))
         test_node.clear_invs()
 
@@ -62,12 +63,14 @@ class FeeFilterTest(BitcoinTestFramework):
 
         # Test that txs are still being received (paying 20 sat/byte)
         txids = [node1.sendtoaddress(node1.getnewaddress(), 1) for x in range(3)]
+        [verify_tx_sent(node1, txid) for txid in txids]
         assert(allInvsMatch(txids, test_node))
         test_node.clear_invs()
 
         # Change tx fee rate to 10 sat/byte and test they are no longer received
         node1.settxfee(Decimal("0.00100000"))
-        [node1.sendtoaddress(node1.getnewaddress(), 1) for x in range(3)]
+        txids = [node1.sendtoaddress(node1.getnewaddress(), 1) for x in range(3)]
+        [verify_tx_sent(node1, txid) for txid in txids]
         sync_mempools(self.nodes) # must be sure node 0 has received all txs 
 
         # Send one transaction from node0 that should be received, so that we
@@ -79,12 +82,14 @@ class FeeFilterTest(BitcoinTestFramework):
         # as well.
         node0.settxfee(Decimal("0.00200000"))
         txids = [node0.sendtoaddress(node0.getnewaddress(), 1)]
+        [verify_tx_sent(node0, txid) for txid in txids]
         assert(allInvsMatch(txids, test_node))
         test_node.clear_invs()
 
         # Remove fee filter and check that txs are received again
         test_node.send_and_ping(msg_feefilter(0))
         txids = [node1.sendtoaddress(node1.getnewaddress(), 1) for x in range(3)]
+        [verify_tx_sent(node1, txid) for txid in txids]
         assert(allInvsMatch(txids, test_node))
         test_node.clear_invs()
 

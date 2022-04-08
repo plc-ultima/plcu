@@ -245,6 +245,7 @@ class MintingTest(BitcoinTestFramework):
         amount = ToCoins(amount)
         node0 = self.nodes[0]
         txid = node0.sendtoaddress(address, amount)
+        verify_tx_sent(node0, txid)
         if generate_block:
             blocks = node0.generate(1)
             self.test_node.sync_with_ping()
