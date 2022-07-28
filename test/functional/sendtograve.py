@@ -138,45 +138,6 @@ class SendToGraveTest(BitcoinTestFramework):
         return txid
 
 
-    def restart_node_0(self, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None):
-        node0 = self.nodes[0]
-        node1 = self.nodes[1]
-        self.sync_all()
-
-        if use_cert:
-            with open(self.taxfree_cert_filename, 'w', encoding='utf8') as f:
-                body = \
-                    '{\n' \
-                    '    "pubkeys":\n' \
-                    '    [\n' \
-                    '        "%s"\n' \
-                    '    ],\n' \
-                    '    "certs":\n' \
-                    '    [\n' \
-                    '        {\n' \
-                    '            "txid": "%s",\n' \
-                    '            "vout": 0\n' \
-                    '        },\n' \
-                    '        {\n' \
-                    '            "txid": "%s",\n' \
-                    '            "vout": 0\n' \
-                    '        }\n' \
-                    '    ]\n' \
-                    '}\n' % (bytes_to_hex_str(super_key_pubkey), root_cert_hash, pass_cert_hash)
-                f.write(body)
-
-        self.stop_node(0)
-        more_args = [f'-taxfreecert={self.taxfree_cert_filename}'] if use_cert else []
-        self.start_node(0, extra_args=self.extra_args[0] + more_args)
-        connect_nodes(self.nodes[0], 1)
-        if use_cert:
-            assert_equal(node0.getwalletinfo()['taxfree_certificate'], self.taxfree_cert_filename)
-        else:
-            assert_not_in('taxfree_certificate', node0.getwalletinfo())
-        node1.generate(1)
-        self.sync_all()
-
-
     def run_scenario(self, amount, with_cert, accepted=True, reject_reason_rpc=None, reject_reason_p2p=None):
         node0 = self.nodes[0]
         node1 = self.nodes[1]
@@ -205,7 +166,7 @@ class SendToGraveTest(BitcoinTestFramework):
             node1.generate(1)
             self.sync_all()
 
-        self.restart_node_0(with_cert, super_key.get_pubkey() if with_cert else None, root_cert_hash, pass_cert_hash)
+        restart_node_with_cert(self, with_cert, super_key.get_pubkey() if with_cert else None, root_cert_hash, pass_cert_hash)
 
         if with_cert:
             node0.importprivkey(SecretBytesToBase58(super_key.get_secret()))

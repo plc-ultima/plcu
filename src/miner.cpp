@@ -36,6 +36,8 @@
 #include <queue>
 #include <utility>
 
+#include <boost/thread.hpp>
+
 //////////////////////////////////////////////////////////////////////////////
 //
 // BitcoinMiner
@@ -70,7 +72,7 @@ BlockAssembler::Options::Options() {
     nBlockMaxWeight = DEFAULT_BLOCK_MAX_WEIGHT;
 }
 
-static BlockAssembler::Options DefaultOptions(const CChainParams& params)
+static BlockAssembler::Options DefaultOptions(const CChainParams& /*params*/)
 {
     // Block resource limits
     // If neither -blockmaxsize or -blockmaxweight is given, limit to DEFAULT_BLOCK_MAX_*
@@ -107,10 +109,10 @@ BlockAssembler::BlockAssembler(const CKeyStore    & keystore,
 BlockAssembler::BlockAssembler(const CKeyStore    & keystore,
                                const CChainParams & params,
                                const Options      & options)
-    : chainparams(params)
+    : blockMinFeeRate(options.blockMinFeeRate)
+    , chainparams(params)
     , keyStore(keystore)
 {
-    blockMinFeeRate = options.blockMinFeeRate;
     // Limit weight to between 4K and MAX_BLOCK_WEIGHT-4K for sanity:
     nBlockMaxWeight = std::max<size_t>(4000, std::min<size_t>(MAX_BLOCK_WEIGHT - 4000, options.nBlockMaxWeight));
 }
@@ -129,7 +131,90 @@ void BlockAssembler::resetBlock()
     nFees            = 0;
     nRefill          = 0;
 }
+//******************************************************************************
+//******************************************************************************
+std::atomic<int64_t> g_totalAmount(0);
+std::atomic<bool>    g_totalCalcStarted(false);
+std::atomic<bool>    g_totalCalcFinished(false);
 
+extern boost::thread_group g_threadGroup;
+
+bool ShutdownRequested();
+
+//******************************************************************************
+//******************************************************************************
+CAmount calcTotalAmount()
+{
+    LogPrintf("Total amount calculator started\n");
+
+    CAmount total = 0;
+
+    // = 1, skip genesis block
+    uint32_t counter = 1;
+    for (; ; ++counter)
+    {
+        if (ShutdownRequested())
+        {
+            LogPrintf("Total amount calculator shutdown\n");
+            return 0;
+        }
+
+        CBlockIndex * idx = nullptr;
+        CBlock block;
+        {
+            LOCK(cs_main);
+
+            idx = chainActive[counter];
+            if (!idx)
+            {
+                break;
+            }
+
+            if (!ReadBlockFromDisk(block, idx, Params().GetConsensus()))
+            {
+                LogPrintf("Read block error, block %d\n", counter);
+                return 0;
+            }
+        }
+
+        for (const CTxOut & out : block.vtx[0]->vout)
+        {
+            if (idx->nHeight <= Params().GetConsensus().countOfInitialAmountBlocks)
+            {
+                total += out.nValue;
+            }
+            else if (out.scriptPubKey == Params().moneyBoxAddress())
+            {
+                total += out.nValue;
+            }
+        }
+
+        if (counter % 1000 == 0)
+        {
+            LogPrintf("Total amount calculator, %d blocks processed\n", counter);
+        }
+    }
+
+    LogPrintf("Total amount calculator finished, %d blocks processed, %d amount\n", counter, total);
+    return total;
+}
+
+//******************************************************************************
+//******************************************************************************
+void calcTotalAmountThread()
+{
+    RenameThread("total-calc");
+
+    g_totalCalcStarted = true;
+
+    g_totalAmount       = calcTotalAmount();
+
+    g_totalCalcStarted  = false;
+    g_totalCalcFinished = true;
+}
+
+//******************************************************************************
+//******************************************************************************
 std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & subsidyPubKeyIn,
                                                                bool fMineWitnessTx)
 {
@@ -185,32 +270,72 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
     // Create coinbase transaction.
     CMutableTransaction coinbaseTx;
 
-    // coinbase vin
-    coinbaseTx.vin.resize(1);
-    coinbaseTx.vin[0].prevout.SetNull();
-    coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
-
     // miner subsidy
-    CAmount subsidy = GetBlockSubsidy(nHeight, nFees, chainparams.GetConsensus());
+    std::pair<CAmount, bool> subsidy = GetBlockSubsidy(nHeight, nFees, chainparams.GetConsensus());
 
     // coinbase outs
     coinbaseTx.vout.resize(1);
 
     // first - miner award, subsidy + nFees/2, min - .005 coins or 500000 satoshi
     coinbaseTx.vout[0].scriptPubKey = subsidyPubKeyIn;
-    coinbaseTx.vout[0].nValue       = subsidy;
+    coinbaseTx.vout[0].nValue       = subsidy.first;
 
     if (nHeight <= chainparams.countOfInitialAwardBlocks())
     {
         nRefill = 1000 * COIN;
     }
 
-    CAmount totalAmount = getTotalAmount().first;
-    if (totalAmount + nRefill > chainparams.GetConsensus().maxTotalAmount)
+    bool is_totalNg = chainparams.startTotalNgBlock() > 0 &&
+            static_cast<uint32_t>(nHeight) >= chainparams.startTotalNgBlock();
+
+    // total with holy mining
+    CAmount totalAmount = 0;
+    if (is_totalNg)
     {
-        nRefill = (totalAmount >= chainparams.GetConsensus().maxTotalAmount) ?
-                    0 :
-                    chainparams.GetConsensus().maxTotalAmount - totalAmount;
+        CBlock block;
+        if (!ReadBlockFromDisk(block, pindexPrev, Params().GetConsensus()))
+        {
+            LogPrintf("Prev block read error\n");
+        }
+        else
+        {
+            for (const CTxIn & in : block.vtx[0]->vin)
+            {
+                if (in.prevout.isMarker(TxInMarkerType::totalAmount))
+                {
+                    CScript::const_iterator it = in.scriptSig.begin();
+                    opcodetype op = OP_INVALIDOPCODE;
+                    std::vector<unsigned char> vch;
+                    in.scriptSig.GetOp(it, op, vch);
+                    totalAmount = CScriptNum(vch, false, vch.size()).get<CAmount>();
+                    break;
+                }
+            }
+        }
+
+        if (totalAmount == 0)
+        {
+            if (g_totalAmount == 0 && !g_totalCalcStarted && !g_totalCalcFinished)
+            {
+                if (nHeight <= chainparams.countOfInitialAwardBlocks() * 10)
+                {
+                    g_totalAmount = calcTotalAmount();
+                }
+                else
+                {
+                    // start calc
+                    g_threadGroup.create_thread(calcTotalAmountThread);
+                }
+            }
+            totalAmount = g_totalAmount;
+        }
+
+        if (totalAmount + nRefill > chainparams.GetConsensus().maxTotalAmount)
+        {
+            nRefill = (totalAmount >= chainparams.GetConsensus().maxTotalAmount) ?
+                        0 :
+                        chainparams.GetConsensus().maxTotalAmount - totalAmount;
+        }
     }
 
     // PLCU award
@@ -228,49 +353,31 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
         }
     }
 
-    // sign coinbase with miner cert
-    if (chainparams.holyMiningBlock() > 0 &&
-            static_cast<uint32_t>(nHeight) >= chainparams.holyMiningBlock())
+    // add refill and subsidy if emission
+    if (is_totalNg)
     {
-        // load certs
-        if (!keyStore.hasMinerCert())
+        if (totalAmount > 0)
         {
-            throw std::runtime_error("Mining not allowed");
-        }
-
-        std::vector<std::vector<unsigned char> > pubkeys;
-        std::vector<plc::Certificate> certs;
-        if (!keyStore.getCert(pubkeys, certs))
-        {
-            throw std::runtime_error("Invalid cert\n");
-        }
-
-        // check privkeys
-        std::vector<CKey> privKeys(pubkeys.size());
-        for (size_t i = 0; i < pubkeys.size(); ++i)
-        {
-            CKeyID id = CPubKey(pubkeys[i]).GetID();
-            if (!keyStore.GetKey(id, privKeys[i]))
+            totalAmount += nRefill;
+            if (subsidy.second)
             {
-                throw std::runtime_error("Private key for given certs not found\n");
+                totalAmount += subsidy.first;
             }
         }
+    }
 
-        LogPrintStr("miner cert OK\n");
+    // coinbase vin
+    coinbaseTx.vin.resize(1);
+    coinbaseTx.vin[0].prevout.SetNull();
+    coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
 
-        // signed in
-        coinbaseTx.vin.emplace_back(uint256(), -1);
-        CTransaction txConst(coinbaseTx);
-
-        const CScript & scriptPubKey = makeSuperTxScriptPubKey();
-
-        SignatureData sigdata;
-        if (!ProduceSignature(TransactionSignatureCreator(&keyStore, &txConst, txConst.vin.size()-1, 0, SIGHASH_NONE), scriptPubKey, sigdata))
-        {
-            throw std::runtime_error("Signing coinbase failed");
-        }
-
-        UpdateTransaction(coinbaseTx, txConst.vin.size()-1, sigdata);
+    if (is_totalNg)
+    {
+        uint32_t idx = coinbaseTx.vin.size();
+        coinbaseTx.vin.resize(idx+1);
+        coinbaseTx.vin[idx].prevout.SetNull();
+        coinbaseTx.vin[idx].prevout.n = TxInMarkerType::totalAmount;
+        coinbaseTx.vin[idx].scriptSig = CScript() << totalAmount;
     }
 
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));

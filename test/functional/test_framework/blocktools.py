@@ -10,7 +10,7 @@ from .util import *
 import binascii
 
 
-def get_moneybox_granularity(height):
+def get_moneybox_granularity(height=None):
     return 100 * COIN
 
 # Create a block (with regtest difficulty)
@@ -99,13 +99,15 @@ def get_plc_award(height, refill_moneybox_amount, granularity):
 # Create a coinbase transaction.
 # If pubkey is passed in, the coinbase output will be a P2PK output;
 # otherwise an anyone-can-spend output.
-def create_coinbase(height, pubkey = None, minerfees = 0, refill_moneybox_amount = 0, granularity = None,
-                    moneyboxscript = GetP2SHMoneyboxScript()):
+def create_coinbase(height, pubkey=None, minerfees=0, refill_moneybox_amount=0, granularity=None,
+                    moneyboxscript=GetP2SHMoneyboxScript(), total_bc_amount=None):
     if granularity is None:
         granularity = get_moneybox_granularity(height)
+    if total_bc_amount is None:
+        total_bc_amount = get_total_expected(height)
     coinbase = CTransaction()
-    coinbase.vin.append(CTxIn(COutPoint(0, 0xffffffff), 
-                ser_string(serialize_script_num(height)), 0xffffffff))
+    coinbase.vin.append(CTxIn(COutPoint(0, TXIN_MARKER_COINBASE), ser_string(serialize_script_num(height)), 0xffffffff))
+    coinbase.vin.append(CTxIn(COutPoint(0, TXIN_MARKER_TOTAL_AMOUNT), ser_string(serialize_script_num(ToSatoshi(total_bc_amount))), 0xffffffff))
     coinbase.vout = []
 
     subsidy = CTxOut()
@@ -167,3 +169,6 @@ def get_tx_output_amount(tx, output_indexes):
         if i in output_indexes:
             amount_sum += out['value']
     return amount_sum
+
+def get_total_expected(height):
+    return (BASE_CB_AMOUNT + ToCoins(get_moneybox_granularity(height) * 10)) * min(height, 100)

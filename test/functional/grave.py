@@ -55,7 +55,16 @@ class GraveTest(BitcoinTestFramework):
         self.num_nodes = 1
         self.setup_clean_chain = False
         self.extra_args = [['-debug', '-whitelist=127.0.0.1']]
-        self.outpoints = []
+        self.outpoints_p2pk = []
+        self.outpoints_p2pkh = []
+        self.outpoints_fund1 = []  # (my_addr OR (addr1 + addr2))
+        self.outpoints_fund2 = []  # (addr1 OR (my_addr + addr2))
+        (self.main_key, self.main_pubkey, self.main_pkh, self.main_scriptpubkey_p2pkh, self.main_scriptpubkey_p2pk) = create_my_key()
+        (self.key1, self.pubkey1, self.pkh1, _, _) = create_my_key()
+        (self.key2, self.pubkey2, self.pkh2, _, _) = create_my_key()
+        (self.key3, self.pubkey3, self.pkh3, _, _) = create_my_key()
+        self.main_scriptpubkey_fund1 = GetAbMintingMultisigScript(self.main_key, self.key1, self.key2)
+        self.main_scriptpubkey_fund2 = GetAbMintingMultisigScript(self.key1, self.main_key, self.key3)
 
 
     def setup_network(self):
@@ -69,18 +78,62 @@ class GraveTest(BitcoinTestFramework):
         self.test_node.wait_for_verack()
         self.test_node.sync_with_ping()
 
-
-    def compose_and_send_tx(self, outputs, accepted, reject_reason = None):
-        outpoint = self.outpoints.pop(0)
+    def compose_and_send_tx_from_p2pk_input(self, outputs, accepted, reject_reason=None):
+        outpoint = self.outpoints_p2pk.pop(0)
         tx1 = CTransaction()
-        tx1.vin.append(CTxIn(outpoint, self.my_p2pkh_scriptpubkey1, 0xffffffff))
+        tx1.vin.append(CTxIn(outpoint, b'', 0xffffffff))
         tx1.vout = outputs
-        (sig_hash, err) = SignatureHash(self.my_p2pkh_scriptpubkey1, tx1, 0, SIGHASH_ALL)
+        (sig_hash, err) = SignatureHash(self.main_scriptpubkey_p2pk, tx1, 0, SIGHASH_ALL)
         assert (err is None)
-        signature = self.my_key1.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
-        tx1.vin[0].scriptSig = CScript([signature, self.my_pubkey1])
+        signature = self.main_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        tx1.vin[0].scriptSig = CScript([signature])
         tx1.rehash()
         return send_tx(self.nodes[0], self.test_node, tx1, accepted, reject_reason, False)
+
+    def compose_and_send_tx_from_p2pkh_input(self, outputs, accepted, reject_reason=None):
+        outpoint = self.outpoints_p2pkh.pop(0)
+        tx1 = CTransaction()
+        tx1.vin.append(CTxIn(outpoint, b'', 0xffffffff))
+        tx1.vout = outputs
+        (sig_hash, err) = SignatureHash(self.main_scriptpubkey_p2pkh, tx1, 0, SIGHASH_ALL)
+        assert (err is None)
+        signature = self.main_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        tx1.vin[0].scriptSig = CScript([signature, self.main_pubkey])
+        tx1.rehash()
+        return send_tx(self.nodes[0], self.test_node, tx1, accepted, reject_reason, False)
+
+    def compose_and_send_tx_from_fund1_input(self, outputs, accepted, reject_reason=None):
+        outpoint = self.outpoints_fund1.pop(0)
+        tx1 = CTransaction()
+        tx1.vin.append(CTxIn(outpoint, b'', 0xffffffff))
+        tx1.vout = outputs
+        (sig_hash, err) = SignatureHash(self.main_scriptpubkey_fund1, tx1, 0, SIGHASH_ALL)
+        assert (err is None)
+        signature = self.main_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        tx1.vin[0].scriptSig = CScript([signature, self.main_pubkey])
+        tx1.rehash()
+        return send_tx(self.nodes[0], self.test_node, tx1, accepted, reject_reason, False)
+
+    def compose_and_send_tx_from_fund2_input(self, outputs, accepted, reject_reason=None):
+        outpoint = self.outpoints_fund2.pop(0)
+        tx1 = CTransaction()
+        tx1.vin.append(CTxIn(outpoint, b'', 0xffffffff))
+        tx1.vout = outputs
+        (sig_hash, err) = SignatureHash(self.main_scriptpubkey_fund2, tx1, 0, SIGHASH_ALL)
+        assert (err is None)
+        keyA = self.main_key
+        keyB = self.key3
+        signature0 = keyA.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        signature1 = keyB.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        tx1.vin[0].scriptSig = CScript([OP_0, signature0, signature1, OP_2, keyA.get_pubkey(), keyB.get_pubkey()])
+        tx1.rehash()
+        return send_tx(self.nodes[0], self.test_node, tx1, accepted, reject_reason, False)
+
+    def compose_and_send_tx(self, outputs, accepted, reject_reason=None):
+        self.compose_and_send_tx_from_p2pk_input(outputs, accepted, reject_reason)
+        self.compose_and_send_tx_from_p2pkh_input(outputs, accepted, reject_reason)
+        self.compose_and_send_tx_from_fund1_input(outputs, accepted, reject_reason)
+        self.compose_and_send_tx_from_fund2_input(outputs, accepted, reject_reason)
 
 
     def check_sendtoaddress(self, node, address, amount, subtractfeefromamount=False, changeToNewAddress=False, changeExists=None):
@@ -214,6 +267,16 @@ class GraveTest(BitcoinTestFramework):
             assert_raises(RuntimeError, find_output_by_address, node0, parent_out_address, tx_raw=txraw)
 
 
+    def generate_outpoint(self, node, amount, script, outpoints):
+        tx = CTransaction()
+        tx.vout.append(CTxOut(ToSatoshi(amount), script))
+        rawtx = bytes_to_hex_str(tx.serialize())
+        rawtxfund = node.fundrawtransaction(rawtx)['hex']
+        tx_signed = node.signrawtransaction(rawtxfund)['hex']
+        txid = node.sendrawtransaction(tx_signed)
+        outpoints.append(COutPoint(int(txid, 16), find_output(node, txid, amount)))
+
+
     def run_test(self):
         node0 = self.nodes[0]
         self.test_node.sync_with_ping()
@@ -301,13 +364,16 @@ class GraveTest(BitcoinTestFramework):
         verify_tx_sent(node0, txid)
 
         # Generate utxos:
-        (self.my_key1, self.my_pubkey1, self.my_pkh1, self.my_p2pkh_scriptpubkey1, self.my_p2pk_scriptpubkey1) = create_my_key()
         (burn1, burn2, change) = BurnedAndChangeAmount(amount - fee, keep_sum=False)
         self.log.debug(f'amount: {amount}, fee: {fee}, burn1: {burn1}, burn2: {burn2}, change: {change}')
-        for i in range(20):
-            txid = node0.sendtoaddress(AddressFromPubkeyHash(self.my_pkh1), amount)
-            self.outpoints.append(COutPoint(int(txid, 16), find_output(node0, txid, amount)))
-        self.nodes[0].generate(1)
+        for i in range(30):
+            self.generate_outpoint(node0, amount, self.main_scriptpubkey_p2pk, self.outpoints_p2pk)
+            self.generate_outpoint(node0, amount, self.main_scriptpubkey_p2pkh, self.outpoints_p2pkh)
+            self.generate_outpoint(node0, amount, self.main_scriptpubkey_fund1, self.outpoints_fund1)
+            self.generate_outpoint(node0, amount, self.main_scriptpubkey_fund2, self.outpoints_fund2)
+            if len(node0.getrawmempool()) >= 20:
+                node0.generate(1)
+        node0.generate(1)
         self.test_node.sync_with_ping()
 
         # A001: Regular workflow - tx with burn: accepted
@@ -385,59 +451,48 @@ class GraveTest(BitcoinTestFramework):
         vout.append(CTxOut(ToSatoshi(burn1), GraveScript2()))
         self.compose_and_send_tx(vout, False, 'bad-burned')
 
-        # A013: Tx to self (p2pkh --> p2pkh), burn is not needed: accepted
-        vout = []
-        vout.append(CTxOut(ToSatoshi(amount - fee), self.my_p2pkh_scriptpubkey1))
-        self.compose_and_send_tx(vout, True)
-
-        # A014: Tx to self (p2pkh --> p2pkh) with burn - not forbidden: accepted
-        vout = []
-        vout.append(CTxOut(ToSatoshi(change), self.my_p2pkh_scriptpubkey1))
-        vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
-        vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
-        self.compose_and_send_tx(vout, True)
-
-        # A015: Tx to self (p2pkh --> p2pk) without burn, the same key, but different scriptpubkeys: rejected
-        vout = []
-        vout.append(CTxOut(ToSatoshi(amount - fee), self.my_p2pk_scriptpubkey1))
-        self.compose_and_send_tx(vout, False, 'bad-burned')
-
-        # A016: Tx to self (p2pkh --> p2pk) with burn: accepted
-        vout = []
-        vout.append(CTxOut(ToSatoshi(change), self.my_p2pk_scriptpubkey1))
-        vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
-        vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
-        txid = self.compose_and_send_tx(vout, True)
-
-        # A017: Tx to self (p2pk --> p2pkh) without burn, the same key, but different scriptpubkeys: rejected
-        outpoint = COutPoint(int(txid, 16), 0)
-        tx1 = CTransaction()
-        tx1.vin.append(CTxIn(outpoint, self.my_p2pk_scriptpubkey1, 0xffffffff))
-        tx1.vout.append(CTxOut(ToSatoshi(change - fee), self.my_p2pkh_scriptpubkey1))
-        (sig_hash, err) = SignatureHash(self.my_p2pk_scriptpubkey1, tx1, 0, SIGHASH_ALL)
-        assert (err is None)
-        signature = self.my_key1.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
-        tx1.vin[0].scriptSig = CScript([signature])
-        tx1.rehash()
-        send_tx(node0, self.test_node, tx1, False, 'bad-burned', False)
-
-        # A018: Tx to self (p2pk --> p2pk), burn is not needed: accepted
-        tx1 = CTransaction()
-        tx1.vin.append(CTxIn(outpoint, self.my_p2pk_scriptpubkey1, 0xffffffff))
-        tx1.vout.append(CTxOut(ToSatoshi(change - fee), self.my_p2pk_scriptpubkey1))
-        (sig_hash, err) = SignatureHash(self.my_p2pk_scriptpubkey1, tx1, 0, SIGHASH_ALL)
-        assert (err is None)
-        signature = self.my_key1.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
-        tx1.vin[0].scriptSig = CScript([signature])
-        tx1.rehash()
-        send_tx(node0, self.test_node, tx1, True)
-
         # A019: Burn1 to self instead of burn1 address, burn2 ok: rejected
         vout = []
         vout.append(CTxOut(ToSatoshi(change), GetP2PKHScript(pkh1)))
-        vout.append(CTxOut(ToSatoshi(burn1), self.my_p2pkh_scriptpubkey1))
+        vout.append(CTxOut(ToSatoshi(burn1), self.main_scriptpubkey_p2pkh))
         vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
         self.compose_and_send_tx(vout, False)
+
+        # Tx to self using different types of addresses:
+        expected_results = \
+        {
+            # Input |                       output type:
+            # type  |
+            'p2pk':  { 'p2pk': True, 'p2pkh': True, 'fund1': False, 'fund2': False },
+            'p2pkh': { 'p2pk': True, 'p2pkh': True, 'fund1': False, 'fund2': False },
+            'fund1': { 'p2pk': True, 'p2pkh': True, 'fund1': True,  'fund2': False },
+            'fund2': { 'p2pk': True, 'p2pkh': True, 'fund1': False, 'fund2': True  },
+        }
+        compose_and_send_tx_funcs = [(self.compose_and_send_tx_from_p2pk_input, 'p2pk'),
+                                     (self.compose_and_send_tx_from_p2pkh_input, 'p2pkh'),
+                                     (self.compose_and_send_tx_from_fund1_input, 'fund1'),
+                                     (self.compose_and_send_tx_from_fund2_input, 'fund2')]
+        dest_scripts = [(self.main_scriptpubkey_p2pk, 'p2pk'), (self.main_scriptpubkey_p2pkh, 'p2pkh'),
+                        (self.main_scriptpubkey_fund1, 'fund1'), (self.main_scriptpubkey_fund2, 'fund2')]
+        use_burnings = [True, False]
+        for compose_and_send_tx_func_pair in compose_and_send_tx_funcs:
+            compose_and_send_tx_func = compose_and_send_tx_func_pair[0]
+            name_from = compose_and_send_tx_func_pair[1]
+            for dest_script_pair in dest_scripts:
+                dest_script = dest_script_pair[0]
+                name_to = dest_script_pair[1]
+                burn_free = expected_results[name_from][name_to]
+                for use_burning in use_burnings:
+                    logger.debug(f'Tx to self, from {name_from} to {name_to}, use_burning: {use_burning}, burn_free: {burn_free}')
+                    vout = []
+                    if use_burning:
+                        vout.append(CTxOut(ToSatoshi(change), dest_script))
+                        vout.append(CTxOut(ToSatoshi(burn1), GraveScript1()))
+                        vout.append(CTxOut(ToSatoshi(burn2), GraveScript2()))
+                    else:
+                        vout.append(CTxOut(ToSatoshi(amount - fee), dest_script))
+                    compose_and_send_tx_func(vout, accepted=use_burning or burn_free, reject_reason='bad-burned')
+
 
 
 if __name__ == '__main__':

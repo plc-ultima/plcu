@@ -37,7 +37,7 @@ from decimal import Decimal, ROUND_DOWN
 
 import plc_cryptonight
 from test_framework.siphash import siphash256
-from test_framework.util import hex_str_to_bytes, bytes_to_hex_str, wait_until, COIN
+from test_framework.util import *
 
 BIP0031_VERSION = 60000
 MY_VERSION = 80014  # past bip-31 for ping/pong
@@ -1865,3 +1865,68 @@ class EarlyDisconnectError(Exception):
 
     def __str__(self):
         return repr(self.value)
+
+
+def extract_total_amount_from_cb_tx(tx):
+    if type(tx) == CTransaction:
+        vin = [v for v in tx.vin if v.prevout.n == TXIN_MARKER_TOTAL_AMOUNT]
+        assert_equal(len(vin), 1)
+        coinbase_data_full = vin[0].scriptSig
+        data_len = int(coinbase_data_full[:1][0])
+        coinbase_data_bin = coinbase_data_full[1:]
+        assert_equal(len(coinbase_data_bin), data_len)
+        coinbase_data_bin = reverse(coinbase_data_bin)
+        total_amount = int(coinbase_data_bin.hex(), 16) if data_len else 0
+    elif type(tx) == dict:
+        # node.decoderawtransaction() json object:
+        vin = tx['vin']
+        vin = [v for v in vin if v['coinbasetype'] == TXIN_MARKER_TOTAL_AMOUNT]
+        assert_equal(len(vin), 1)
+        coinbase_data_hex_full = vin[0]['coinbase']
+        data_len = int(coinbase_data_hex_full[:2], 16)
+        coinbase_data_hex = coinbase_data_hex_full[2:]
+        coinbase_data_bin = bytes.fromhex(coinbase_data_hex)
+        assert_equal(len(coinbase_data_bin), data_len)
+        coinbase_data_bin = reverse(coinbase_data_bin)
+        total_amount = int(coinbase_data_bin.hex(), 16) if data_len else 0
+    else:
+        assert 0, f'unknown tx type: {type(tx)}'
+    return total_amount
+
+
+def set_total_amount_to_cb_tx(tx, total_amount):
+    found = False
+    if total_amount is not None:
+        amount_hex = '%016X' % total_amount
+        amount_bin = bytes.fromhex(amount_hex)
+        amount_bin = reverse(amount_bin)
+        coinbase_data_full = b'\x08' + amount_bin
+    else:
+        coinbase_data_full = b''
+
+    if type(tx) == CTransaction:
+        for input in tx.vin:
+            if input.prevout.n == TXIN_MARKER_TOTAL_AMOUNT:
+                input.scriptSig = coinbase_data_full
+                found = True
+        if not found:
+            tx.vin.append(CTxIn(COutPoint(0, TXIN_MARKER_TOTAL_AMOUNT), coinbase_data_full, 0xFFFFFFFF))
+    elif type(tx) == dict:
+        # node.decoderawtransaction() json object:
+        for input in tx['vin']:
+            if input['coinbasetype'] == TXIN_MARKER_TOTAL_AMOUNT:
+                input['coinbase'] = coinbase_data_full.hex()
+                found = True
+        if not found:
+            tx['vin'].append({'coinbase': coinbase_data_full.hex(), 'coinbasetype': TXIN_MARKER_TOTAL_AMOUNT, 'sequence': 0xFFFFFFFF})
+    else:
+        assert 0, f'unknown tx type: {type(tx)}'
+
+
+def print_tx_ex(tx, inputs_cnt=None, outputs_cnt=None, with_wit=True):
+    assert_equal(type(tx), CTransaction)
+    return "CTransaction(nVersion=%i (%08x); vin(%i)=%s; vout(%i)=%s; wit=%s; nLockTime=%i; nActiveTime=%i; sha256=%064x)" \
+           % (tx.nVersion, tx.nVersion, len(tx.vin), repr(tx.vin if inputs_cnt is None else tx.vin[:inputs_cnt]),
+              len(tx.vout), repr(tx.vout if outputs_cnt is None else tx.vout[:outputs_cnt]),
+              repr(tx.wit) if with_wit else '<skipped>', tx.nLockTime,
+              tx.nActiveTime if tx.nActiveTime is not None else 0, tx.sha256 if tx.sha256 is not None else 0)

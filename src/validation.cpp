@@ -480,7 +480,7 @@ std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
             CCoinsViewMemPool view(pcoinsTip, mempool);
             if (!view.GetCoin(out, coin) || mempool.isSpent(out))
             {
-                LogPrintf("prev out point not found <%s:%n>", HexStr(in.prevout.hash), in.prevout.n);
+                LogPrintf("prev out point not found <%s:%d>\n", HexStr(in.prevout.hash), in.prevout.n);
                 continue;
             }
         }
@@ -538,7 +538,7 @@ std::pair<CAmount, CAmount> getTransferAmount(const std::vector<CTxIn> & vin,
 bool checkBurnedAmount(const std::vector<CTxIn> & vin,
                        const std::vector<CTxOut> & vout)
 {
-    std::set<CScript> scripts;
+    std::set<CTxDestination> destinations;
 
     for (const CTxIn & in : vin)
     {
@@ -549,7 +549,7 @@ bool checkBurnedAmount(const std::vector<CTxIn> & vin,
             CCoinsViewMemPool view(pcoinsTip, mempool);
             if (!view.GetCoin(out, coin) || mempool.isSpent(out))
             {
-                LogPrintf("bad-burned, prev out point not found <%s:%n>", HexStr(in.prevout.hash), in.prevout.n);
+                LogPrintf("bad-burned, prev out point not found <%s:%d>\n", HexStr(in.prevout.hash), in.prevout.n);
                 continue;
             }
         }
@@ -561,8 +561,17 @@ bool checkBurnedAmount(const std::vector<CTxIn> & vin,
             continue;
         }
 
-        scripts.insert(CScript(coinsOut.scriptPubKey.begin_skipLeadingData(), coinsOut.scriptPubKey.end()));
-        scripts.insert(CScript(coinsOut.scriptPubKey.begin_skipLockTimeVerify(), coinsOut.scriptPubKey.end()));
+        txnouttype type = TX_NONSTANDARD;
+        std::vector<CTxDestination> addresses;
+        int nRequired = 0;
+        uint32_t lockTime = 0;
+        if (!ExtractDestinations(coinsOut.scriptPubKey, type, addresses, nRequired, lockTime))
+        {
+            // no destinations
+            continue;
+        }
+
+        std::copy(addresses.begin(), addresses.end(), std::inserter(destinations, destinations.end()));
     }
 
     CAmount totalOut  = 0;
@@ -581,15 +590,29 @@ bool checkBurnedAmount(const std::vector<CTxIn> & vin,
             continue;
         }
 
-        CScript tmp(out.scriptPubKey.begin_skipLeadingData(), out.scriptPubKey.end());
-        if (scripts.find(tmp) != scripts.end())
+        txnouttype type = TX_NONSTANDARD;
+        std::vector<CTxDestination> addresses;
+        int nRequired = 0;
+        uint32_t lockTime = 0;
+        if (!ExtractDestinations(out.scriptPubKey, type, addresses, nRequired, lockTime))
         {
-            // transfer to self
+            // no destinations
             continue;
         }
 
-        tmp = CScript(out.scriptPubKey.begin_skipLockTimeVerify(), out.scriptPubKey.end());
-        if (scripts.find(tmp) != scripts.end())
+        uint32_t counter = 0;
+        for (const CTxDestination & dest : addresses)
+        {
+            if (destinations.find(dest) == destinations.end())
+            {
+                // not to self, finish
+                break;
+            }
+
+            ++counter;
+        }
+
+        if (counter == addresses.size())
         {
             // transfer to self
             continue;
@@ -1250,22 +1273,22 @@ bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus
     return true;
 }
 
-CAmount GetBlockSubsidy(const int nHeight, const CAmount & nFees,
-                        const Consensus::Params & consensusParams)
+std::pair<CAmount, bool> GetBlockSubsidy(const int nHeight, const CAmount & nFees,
+                                         const Consensus::Params & consensusParams)
 {
     if (nHeight <= consensusParams.countOfInitialAmountBlocks)
     {
         // initial coins
-        return 5000 * COIN;
+        return std::make_pair(5000 * COIN, true);
     }
 
     else if (nHeight <= consensusParams.defaultFeeReductionBlock)
     {
-        return std::max<int64_t>(nFees/2, .005 * COIN);
+        return std::make_pair(std::max<int64_t>(nFees/2, .005 * COIN), false);
     }
 
     // min fee = 0.005 coins, 500000 satoshi
-    return std::max<int64_t>(nFees/2, .00005 * COIN);
+    return std::make_pair(std::max<int64_t>(nFees/2, .00005 * COIN), false);
 }
 
 bool IsInitialBlockDownload()
@@ -2010,109 +2033,6 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
     return flags;
 }
 
-
-bool checkInputCorrectlySigned(const CTxIn & in,
-                               const BaseSignatureChecker & checker)
-{
-    // [<sig><pub>]<txid><n><txid><n><OP_CHECKSUPER>
-
-    CScript::Ops ops;
-    if (!in.scriptSig.parse(ops))
-    {
-        return false;
-    }
-
-    if (ops.size() < 7)
-    {
-        return false;
-    }
-
-    std::vector<std::vector<unsigned char> > signatures;
-    std::vector<std::vector<unsigned char> > pubkeys;
-
-    uint32_t i = 0;
-    for (; i < ops.size() - 5; i += 2)
-    {
-        if (!CheckSignatureEncoding(ops[i].second, SCRIPT_VERIFY_STRICTENC, nullptr) ||
-            !CheckPubKeyEncoding(ops[i+1].second, SCRIPT_VERIFY_STRICTENC, SIGVERSION_BASE, nullptr))
-        {
-            break;
-        }
-
-        signatures.emplace_back(ops[i].second);
-        pubkeys.emplace_back(ops[i+1].second);
-    }
-
-    if (signatures.size() == 0 ||pubkeys.size() == 0)
-    {
-        return false;
-    }
-
-    std::vector<plc::Certificate> certs;
-    for (; i < ops.size() - 1; i += 2)
-    {
-        if (ops[i].second.size() != sizeof(uint256) ||
-            ops[i +1].second.size() > sizeof(uint32_t))
-        {
-            return false;
-        }
-
-        certs.emplace_back(uint256(ops[i].second), CScriptNum(ops[i + 1].second, true).get<uint32_t>());
-    }
-
-    if (ops[i].second.size() != 1 || ops[i].second[0] != OP_CHECKSUPER)
-    {
-        return false;
-    }
-
-    plc::Validator v;
-
-    plc::CertParameters params;
-    if (!v.validateChainOfCerts(certs, pubkeys, params))
-    {
-        return false;
-    }
-
-    if ((params.flags & plc::holyShovel) == 0)
-    {
-        return false;
-    }
-
-    if (!v.verifyCertSignatures(signatures, pubkeys, params,
-                                CScript(ops[i].second.begin(), ops[i].second.end()), checker))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-bool checkTxCorrectlySigned(const CTransactionRef & tx, CValidationState & state)
-{
-    bool isFound = false;
-    for (uint32_t i = 0; i < tx->vin.size(); ++i)
-    {
-        const CTxIn & in = tx->vin[i];
-
-        TransactionSignatureChecker checker(tx.get(), i, 0);
-
-        if (checkInputCorrectlySigned(in, checker))
-        {
-            isFound = true;
-            break;
-        }
-    }
-
-    if (!isFound)
-    {
-        return state.DoS(100,
-                         error("ConnectBlock(): digger without shovel"),
-                               REJECT_INVALID, "bad-cb-cert");
-    }
-
-    return true;
-}
-
 static int64_t nTimeCheck = 0;
 static int64_t nTimeForks = 0;
 static int64_t nTimeVerify = 0;
@@ -2250,14 +2170,77 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     std::vector<PrecomputedTransactionData> txdata;
     txdata.reserve(block.vtx.size()); // Required so that pointers to individual PrecomputedTransactionData don't get invalidated
 
+    bool is_totalNg = chainparams.startTotalNgBlock() > 0 &&
+            static_cast<uint32_t>(pindex->nHeight) >= chainparams.startTotalNgBlock();
+
+    CAmount coinbaseTotal         = 0;
+    bool    is_coinbaseTotalFound = false;
+    bool    is_prevTotalFound     = false;
+
+    CAmount prevTotal      = 0;
+    if (is_totalNg)
+    {
+        CBlock prevblock;
+        if (!(pindex->pprev && ReadBlockFromDisk(prevblock, pindex->pprev, Params().GetConsensus())))
+        {
+            LogPrint(BCLog::VALIDATION, "Preg block not found, %s for %s",
+                     pindex->GetBlockHash().ToString(),
+                     pindex->pprev ? pindex->pprev->GetBlockHash().ToString() : "NULL");
+        }
+        else
+        {
+            for (const CTxIn & in : prevblock.vtx[0]->vin)
+            {
+                if (in.prevout.isMarker(TxInMarkerType::totalAmount))
+                {
+                    CScript::const_iterator it = in.scriptSig.begin();
+                    opcodetype op = OP_INVALIDOPCODE;
+                    std::vector<unsigned char> vch;
+                    in.scriptSig.GetOp(it, op, vch);
+                    prevTotal = CScriptNum(vch, false, vch.size()).get<CAmount>();
+                    is_prevTotalFound = true;
+                    break;
+                }
+            }
+        }
+    }
+
     for (unsigned int i = 0; i < block.vtx.size(); i++)
     {
         const CTransaction &tx = *(block.vtx[i]);
 
         nInputs += tx.vin.size();
 
-        if (!tx.IsCoinBase())
+        if (tx.IsCoinBase())
         {
+            // coinbase
+            if (is_totalNg && is_prevTotalFound)
+            {
+                for (const CTxIn & in : tx.vin)
+                {
+                    if (in.prevout.isMarker(TxInMarkerType::totalAmount))
+                    {
+                        CScript::const_iterator it = in.scriptSig.begin();
+                        opcodetype op = OP_INVALIDOPCODE;
+                        std::vector<unsigned char> vch;
+                        in.scriptSig.GetOp(it, op, vch);
+                        coinbaseTotal = CScriptNum(vch, false, vch.size()).get<CAmount>();
+                        is_coinbaseTotalFound = true;
+                        break;
+                    }
+                }
+
+                if (!is_coinbaseTotalFound)
+                {
+                    return state.DoS(100, error("ConnectBlock(): bad coinbase without total"),
+                                     REJECT_INVALID, "bad-coinbase-without-total");
+                }
+            }
+        }
+        else
+        {
+            // not coinbase
+
             if (!view.HaveInputs(tx))
                 return state.DoS(100, error("ConnectBlock(): inputs missing/spent"),
                                  REJECT_INVALID, "bad-txns-inputs-missingorspent");
@@ -2301,7 +2284,8 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
         nRefill += view.GetUsedMoneyBoxAmount(tx);
 
         CTxUndo undoDummy;
-        if (i > 0) {
+        if (i > 0)
+        {
             blockundo.vtxundo.push_back(CTxUndo());
         }
         UpdateCoins(tx, view, i == 0 ? undoDummy : blockundo.vtxundo.back(), pindex->nHeight, pindex->nTime);
@@ -2312,23 +2296,11 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
 
-    CAmount totalAmount  = IsInitialBlockDownload() ? 0 : getTotalAmount().first;
-    CAmount blockSubsidy = GetBlockSubsidy(pindex->nHeight, nFees, chainparams.GetConsensus());
+    std::pair<CAmount, bool> blockSubsidy = GetBlockSubsidy(pindex->nHeight, nFees, chainparams.GetConsensus());
+
     CAmount foundSubsidy = 0;
     CAmount foundAward   = 0;
     int     countOfAward = 0;
-
-    // check miner
-    if (chainparams.holyMiningBlock() > 0 &&
-            static_cast<uint32_t>(pindex->nHeight) >= chainparams.holyMiningBlock())
-    {
-        if (!checkTxCorrectlySigned(block.vtx[0], state))
-        {
-            return state.DoS(100,
-                             error("ConnectBlock(): digger without shovel"),
-                                   REJECT_INVALID, "bad-cb-cert");
-        }
-    }
 
     for (const CTxOut & out : block.vtx[0]->vout)
     {
@@ -2363,11 +2335,11 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
         }
     }
 
-    if (blockSubsidy < foundSubsidy)
+    if (blockSubsidy.first < foundSubsidy)
     {
         return state.DoS(100,
                          error("ConnectBlock(): invalid subsidy value in coinbase (actual=%d vs limit=%d)",
-                               foundSubsidy, blockSubsidy),
+                               foundSubsidy, blockSubsidy.first),
                                REJECT_INVALID, "bad-cb-amount");
     }
 
@@ -2377,23 +2349,39 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
         {
             return state.DoS(100,
                              error("ConnectBlock(): invalid PLCU award value in coinbase (in initial blocks)",
-                                   REJECT_INVALID, "bad-box-amount"));
+                                   REJECT_INVALID, "bad-initial-box-amount"));
         }
         nRefill = 1000 * COIN;
     }
 
-    if (totalAmount + nRefill > chainparams.GetConsensus().maxTotalAmount)
+    if (prevTotal + nRefill > chainparams.GetConsensus().maxTotalAmount)
     {
-        nRefill = (totalAmount >= chainparams.GetConsensus().maxTotalAmount) ?
+        nRefill = (prevTotal >= chainparams.GetConsensus().maxTotalAmount) ?
                     0 :
-                    chainparams.GetConsensus().maxTotalAmount - totalAmount;
+                    chainparams.GetConsensus().maxTotalAmount - prevTotal;
+    }
+
+    CAmount fullTotal = prevTotal + nRefill + (blockSubsidy.second ? blockSubsidy.first : 0);
+    if (prevTotal != 0 && ((coinbaseTotal != fullTotal) || (coinbaseTotal < prevTotal)))
+    {
+        LogPrintf("bad-coinbase-wrong-total, prevTotal: %i, nRefill: %i, fullTotal: %i, blockSubsidy: %i:%i, coinbaseTotal: %i\n",
+                  prevTotal, nRefill, fullTotal, blockSubsidy.first, blockSubsidy.second, coinbaseTotal);
+        return state.DoS(100, error("ConnectBlock(): bad coinbase wrong total amount"),
+                         REJECT_INVALID, "bad-coinbase-wrong-total");
+    }
+
+    if (coinbaseTotal > chainparams.GetConsensus().maxTotalAmount)
+    {
+        nRefill = (coinbaseTotal >= chainparams.GetConsensus().maxTotalAmount) ?
+                    0 :
+                    chainparams.GetConsensus().maxTotalAmount - coinbaseTotal;
     }
 
     if (foundAward != nRefill)
     {
         return state.DoS(100,
                          error("ConnectBlock(): invalid PLCU award value in coinbase (actual=%d vs limit=%d, height=%d, total=%d)",
-                               foundAward, nRefill, pindex->nHeight, totalAmount),
+                               foundAward, nRefill, pindex->nHeight, coinbaseTotal),
                                REJECT_INVALID, "bad-box-amount");
     }
 
@@ -3385,53 +3373,6 @@ static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state,
         return state.DoS(50, false, REJECT_INVALID, "high-hash", false, "proof of work failed");
 
     return true;
-}
-
-std::pair<CAmount, uint32_t> getTotalAmount()
-{
-    CAmount  fullamount = 0;
-    uint32_t count = 0;
-    if (!pcoinsdbview)
-    {
-        // no pcoinsdbview in tests
-        return std::make_pair(fullamount, count);
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    FlushStateToDisk();
-
-    auto t2 = std::chrono::high_resolution_clock::now();
-
-    std::unique_ptr<CCoinsViewCursor> pcursor(pcoinsdbview->Cursor());
-    for (; pcursor->Valid(); pcursor->Next())
-    {
-        boost::this_thread::interruption_point();
-        COutPoint key;
-        Coin coin;
-        if (pcursor->GetKey(key) && pcursor->GetValue(coin))
-        {
-            const CTxOut & out = coin.out;
-            if (out.IsNull())
-            {
-                continue;
-            }
-
-            fullamount += out.nValue;
-            ++count;
-        }
-    }
-
-    auto t3 = std::chrono::high_resolution_clock::now();
-
-    LogPrint(BCLog::VALIDATION,
-             "Total amount %d (%d utxo items) calculated in %d-%d, %d milliseconds\n",
-             fullamount, count,
-             std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count(),
-             std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count(),
-             std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t1).count());
-
-    return std::make_pair(fullamount, count);
 }
 
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot)

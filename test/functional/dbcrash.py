@@ -33,7 +33,7 @@ import time
 
 from test_framework.mininode import *
 from test_framework.script import *
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import *
 
 HTTP_DISCONNECT_ERRORS = [http.client.CannotSendRequest]
@@ -50,7 +50,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         # Set -maxmempool=0 to turn off mempool memory sharing with dbcache
         # Set -rpcservertimeout=900 to reduce socket disconnects in this
         # long-running test
-        self.base_args = ["-limitdescendantsize=0", "-maxmempool=0", "-rpcservertimeout=900", "-dbbatchsize=200000", '-holyminingblock-regtest=5000']
+        self.base_args = ["-limitdescendantsize=0", "-maxmempool=0", "-rpcservertimeout=900", "-dbbatchsize=200000"]
 
         # Set different crash ratios and cache sizes.  Note that not all of
         # -dbcache goes to pcoinsTip.
@@ -59,7 +59,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         self.node2_args = ["-dbcrashratio=24", "-dbcache=16"] + self.base_args
 
         # Node3 is a normal node with default args, except will mine full blocks
-        self.node3_args = ["-blockmaxweight=4000000", '-holyminingblock-regtest=5000']
+        self.node3_args = ["-blockmaxweight=4000000"]
         self.extra_args = [self.node0_args, self.node1_args, self.node2_args, self.node3_args]
 
     def setup_network(self):
@@ -211,6 +211,7 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
             num_transactions += 1
 
     def run_test(self):
+        raise SkipTest("skipped")
         # Track test coverage statistics
         self.restart_counts = [0, 0, 0]  # Track the restarts for nodes 0-2
         self.crashed_on_restart = 0      # Track count of crashes during recovery

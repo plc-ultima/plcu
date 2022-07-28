@@ -162,7 +162,7 @@ public:
         consensus.defaultFeeReductionBlock   = 35000;
         consensus.maxTotalAmount             = 11000000 * COIN;
 
-        consensus.holyMiningBlock            = 0;
+        consensus.startTotalNgBlock          = 237237;
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -284,7 +284,7 @@ public:
         consensus.defaultFeeReductionBlock   = 29000;
         consensus.maxTotalAmount             = 5500000 * COIN;
 
-        consensus.holyMiningBlock            = 152000;
+        consensus.startTotalNgBlock          = 152000;
 
         pchMessageStart[0] = 0xfc;
         pchMessageStart[1] = 0xd1;
@@ -402,7 +402,7 @@ public:
         consensus.defaultFeeReductionBlock   = 2000;
         consensus.maxTotalAmount             = 1100000 * COIN;
 
-        consensus.holyMiningBlock            = 550;
+        consensus.startTotalNgBlock          = 550;
 
         pchMessageStart[0] = 0xef;
         pchMessageStart[1] = 0xbe;
@@ -607,12 +607,23 @@ bool CChainParams::isGrave(const CScript & scriptPubKey) const
 
 //******************************************************************************
 //******************************************************************************
-uint32_t CChainParams::holyMiningBlock() const
+uint32_t CChainParams::maxCaBlock() const
 {
     if (NetworkIDString() == CBaseChainParams::REGTEST)
     {
-        return gArgs.GetArg("-holyminingblock-regtest", consensus.holyMiningBlock);
+        return gArgs.GetArg("-maxcablock-regtest", consensus.maxCaBlock);
+    }
+    return consensus.maxCaBlock;
+}
+
+//******************************************************************************
+//******************************************************************************
+uint32_t CChainParams::startTotalNgBlock() const
+{
+    if (NetworkIDString() == CBaseChainParams::REGTEST)
+    {
+        return gArgs.GetArg("-totalforkblock-regtest", consensus.startTotalNgBlock);
     }
 
-    return consensus.holyMiningBlock;
+    return consensus.startTotalNgBlock;
 }

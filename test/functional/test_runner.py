@@ -26,6 +26,7 @@ import subprocess
 import tempfile
 import re
 import logging
+import xml.etree.ElementTree as ET
 import fnmatch
 from minting_testcases import get_minting_testcases
 
@@ -128,12 +129,12 @@ BASE_SCRIPTS= [
     'resendwallettransactions.py',
     'minchainwork.py',
     'p2p-acceptblock.py',
-    'mining_cert.py',
     'grave.py',
     'coinbase_subsidy.py',
     'total_emission.py',
     'sendtograve.py',
     'free_tx.py',
+    'miami_police.py',
     'minting.py',
     'minting.py --mintalltestcases',
 ]
@@ -246,6 +247,10 @@ def main():
     parser.add_argument('--keepcache', '-k', action='store_true', help='the default behavior is to flush the cache directory on startup. --keepcache retains the cache from the previous testrun.')
     parser.add_argument('--quiet', '-q', action='store_true', help='only print results summary and failure logs')
     parser.add_argument('--tmpdirprefix', '-t', default=tempfile.gettempdir(), help="Root directory for datadirs")
+    parser.add_argument('--junitoutput', '-J', default='junit_results.xml',
+                        help="File that will store JUnit formatted test results. If no absolute path is given it is treated as relative to the temporary directory.")
+    parser.add_argument('--testsuitename', '-n', default='PLC Ultima Node functional tests',
+                        help="Name of the test suite, as it will appear in the logs and in the JUnit report.")
     args, unknown_args = parser.parse_known_args()
 
     # args to be passed on always start with two dashes; tests are the remaining unknown args
@@ -269,6 +274,9 @@ def main():
 
     logging.debug("Temporary test directory at %s" % tmpdir)
     logging.debug("jobs: %d" % args.jobs)
+
+    if not os.path.isabs(args.junitoutput):
+        args.junitoutput = os.path.join(tmpdir, args.junitoutput)
 
     enable_wallet = config["components"].getboolean("ENABLE_WALLET")
     enable_utils = config["components"].getboolean("ENABLE_UTILS")
@@ -332,9 +340,9 @@ def main():
     if not args.keepcache:
         shutil.rmtree("%s/test/cache" % config["environment"]["BUILDDIR"], ignore_errors=True)
 
-    run_tests(test_list, config["environment"]["SRCDIR"], config["environment"]["BUILDDIR"], config["environment"]["EXEEXT"], tmpdir, args.jobs, args.coverage, passon_args)
+    run_tests(test_list, config["environment"]["SRCDIR"], config["environment"]["BUILDDIR"], config["environment"]["EXEEXT"], args.junitoutput, tmpdir, args.jobs, args.testsuitename, args.coverage, passon_args)
 
-def run_tests(test_list, src_dir, build_dir, exeext, tmpdir, jobs=1, enable_coverage=False, args=[]):
+def run_tests(test_list, src_dir, build_dir, exeext, junitoutput, tmpdir, jobs=1, test_suite_name="PLCU", enable_coverage=False, args=[]):
     # Warn if plcultimad is already running (unix only)
     try:
         if subprocess.check_output(["pidof", "plcultimad"]) is not None:
@@ -388,7 +396,9 @@ def run_tests(test_list, src_dir, build_dir, exeext, tmpdir, jobs=1, enable_cove
             print(BOLD[1] + 'stdout:\n' + BOLD[0] + stdout + '\n')
             print(BOLD[1] + 'stderr:\n' + BOLD[0] + stderr + '\n')
 
-    print_results(test_results, max_len_name, (int(time.time() - time0)))
+    runtime = int(time.time() - time0)
+    print_results(test_results, max_len_name, runtime)
+    save_results_as_junit(test_results, junitoutput, runtime, test_suite_name)
 
     if coverage:
         coverage.report_rpc_coverage()
@@ -486,15 +496,17 @@ class TestHandler:
                     self.num_running -= 1
                     self.jobs.remove(j)
 
-                    return TestResult(name, status, int(time.time() - time0)), stdout, stderr
+                    return TestResult(name, status, int(time.time() - time0), stdout, stderr), stdout, stderr
             print('.', end='', flush=True)
 
 class TestResult():
-    def __init__(self, name, status, time):
+    def __init__(self, name, status, time, stdout, stderr):
         self.name = name
         self.status = status
         self.time = time
         self.padding = 0
+        self.stdout = stdout
+        self.stderr = stderr
 
     def __repr__(self):
         if self.status == "Passed":
@@ -593,6 +605,43 @@ class RPCCoverage(object):
                 covered_cmds.update([i.strip() for i in f.readlines()])
 
         return all_cmds - covered_cmds
+
+def save_results_as_junit(test_results, file_name, time, test_suite_name):
+    """
+    Save tests results to file in JUnit format
+
+    See http://llg.cubic.org/docs/junit/ for specification of format
+    """
+    e_test_suite = ET.Element("testsuite",
+                              {"name": "{}".format(test_suite_name),
+                               "tests": str(len(test_results)),
+                               # "errors":
+                               "failures": str(len([t for t in test_results if t.status == "Failed"])),
+                               "id": "0",
+                               "skipped": str(len([t for t in test_results if t.status == "Skipped"])),
+                               "time": str(time),
+                               "timestamp": datetime.datetime.now().isoformat('T')
+                               })
+
+    for test_result in test_results:
+        e_test_case = ET.SubElement(e_test_suite, "testcase",
+                                    {"name": test_result.name,
+                                     "classname": test_result.name,
+                                     "time": str(test_result.time)
+                                     }
+                                    )
+        if test_result.status == "Skipped":
+            ET.SubElement(e_test_case, "skipped", {"message": "skipped"}).text = "skipped"
+        elif test_result.status == "Failed":
+            fail_result = test_result.stderr or test_result.stdout or "<no output>"
+            ET.SubElement(e_test_case, "failure", {"message": "failure"}).text = fail_result
+        # no special element for passed tests
+
+        ET.SubElement(e_test_case, "system-out").text = test_result.stdout
+        ET.SubElement(e_test_case, "system-err").text = test_result.stderr
+
+    ET.ElementTree(e_test_suite).write(
+        file_name, "UTF-8", xml_declaration=True)
 
 
 if __name__ == '__main__':

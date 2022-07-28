@@ -21,7 +21,7 @@ NOT_FINAL_ERROR = "64: non-BIP68-final"
 class BIP68Test(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
-        self.extra_args = [['-holyminingblock-regtest=5000'], ["-acceptnonstdtxn=0", '-holyminingblock-regtest=5000']]
+        self.extra_args = [[], ["-acceptnonstdtxn=0"]]
 
     def run_test(self):
         self.relayfee = self.nodes[0].getnetworkinfo()["relayfee"]

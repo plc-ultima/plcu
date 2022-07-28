@@ -72,6 +72,7 @@ enum
     silverHoof            = 0x00040000,
     shadowEmperor         = 0x00080000,
     holyShovel            = 0x00100000,
+    masterOfTime          = 0x00200000,
     generalFlags          = 0x0fff0000,
     localFlags            = 0x00000fff,
     pubkeyCountMask       = 0x0000f000,

@@ -44,6 +44,10 @@ Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin);
 #endif
 #endif
 
+#include <boost/thread.hpp>
+
+boost::thread_group g_threadGroup;
+
 extern void noui_connect();
 
 // This is all you need to run all the tests

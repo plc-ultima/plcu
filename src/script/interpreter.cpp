@@ -262,14 +262,14 @@ bool getPlcSpecific(const std::vector<std::vector<unsigned char> > & stack,
                     std::vector<plc::Certificate> & certs,
                     std::vector<std::vector<unsigned char> > & pubkeys,
                     std::vector<std::vector<unsigned char> > & signatures,
-                    ScriptError * serror)
+                    ScriptError * serror, size_t & stackUsed)
 {
     if (stack.size() < 6)
     {
         return set_error(serror, SCRIPT_ERR_BAD_SCRIPT);
     }
 
-    size_t stackUsed = 0;
+    stackUsed = 0;
 
     while (stack.size() >= stackUsed + 4)
     {
@@ -286,19 +286,82 @@ bool getPlcSpecific(const std::vector<std::vector<unsigned char> > & stack,
         stackUsed += 2;
     }
 
+    if (certs.size() < 2)
+    {
+        // check, 2 - minimum
+        return set_error(serror, SCRIPT_ERR_BAD_SCRIPT);
+    }
+
     while (stack.size() >= stackUsed+2)
     {
-        ++stackUsed;
-        pubkeys.emplace_back(stacktop(-stackUsed));
-        ++stackUsed;
-        signatures.emplace_back(stacktop(-stackUsed));
-
-        if (!CheckSignatureEncoding(signatures.back(), flags, serror) ||
-            !CheckPubKeyEncoding(pubkeys.back(), flags, sigversion, serror))
+        if (!CheckSignatureEncoding(stacktop(-2-stackUsed), flags, serror) ||
+            !CheckPubKeyEncoding(stacktop(-1-stackUsed), flags, sigversion, serror))
         {
             // serror is set
-            return false;
+            break;
         }
+
+        pubkeys.emplace_back(stacktop(-1-stackUsed));
+        signatures.emplace_back(stacktop(-2-stackUsed));
+
+        stackUsed += 2;
+    }
+
+    return true;
+}
+
+//******************************************************************************
+//******************************************************************************
+bool loadPlcCerts(std::vector<std::vector<unsigned char> > & stack,
+                  CScript::const_iterator pbegin, CScript::const_iterator pend,
+                  const unsigned int flags,
+                  const BaseSignatureChecker & checker,
+                  const SigVersion sigversion,
+                  std::vector<plc::Certificate> & certs, plc::CertParameters & params,
+                  ScriptError * serror)
+{
+    if (stack.size() < 6)
+    {
+        return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+    }
+
+    std::vector<std::vector<unsigned char> > pubkeys;
+    std::vector<std::vector<unsigned char> > signatures;
+
+    size_t stackUsed = 0;
+    bool fSuccess = getPlcSpecific(stack, flags, sigversion,
+                        certs, pubkeys, signatures, serror, stackUsed);
+    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
+    {
+        // error already set
+        return false;
+    }
+
+    // validate certificate
+    plc::Validator validator;
+    fSuccess = fSuccess && validator.validateChainOfCerts(certs, pubkeys, params);
+    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
+    {
+        // bad chain
+        LogPrintf("Validate chain of certs failed <%s>\n", __func__);
+        return set_error(serror, SCRIPT_ERR_BAD_CERTIFICATE);
+    }
+
+    // Subset of script starting at the most recent codeseparator
+    CScript scriptCode(pbegin, pend);
+    fSuccess = fSuccess && validator.verifyCertSignatures(signatures, pubkeys,
+                                                          params, scriptCode, checker);
+    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
+    {
+        // bad signatures
+        LogPrintf("Incorrect cert signatures <%s>\n", __func__);
+        return set_error(serror, SCRIPT_ERR_BAD_SIGNATURES);
+    }
+
+    // rm certs/signatures from stack
+    for (uint32_t i = 0; i < stackUsed; ++i)
+    {
+        stack.pop_back();
     }
 
     return true;
@@ -450,7 +513,25 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
 
                     // Actually compare the specified lock time with the transaction.
                     if (!checker.CheckLockTime(nLockTime))
-                        return set_error(serror, SCRIPT_ERR_UNSATISFIED_LOCKTIME);
+                    {
+                        // rm locktime
+                        stack.pop_back();
+
+                        // check master of time cert
+                        std::vector<plc::Certificate> certs;
+                        plc::CertParameters params;
+
+                        bool hasCerts = loadPlcCerts(stack, pbegincodehash, pend, flags,
+                                                     checker, sigversion,
+                                                     certs, params, serror);
+
+                        if (!hasCerts || (params.flags & plc::masterOfTime) == 0)
+                        {
+                            // restore locktime if error
+                            stack.push_back(nLockTime.getvch());
+                            return set_error(serror, SCRIPT_ERR_UNSATISFIED_LOCKTIME);
+                        }
+                    }
 
                     break;
                 }
@@ -1093,48 +1174,21 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
 
                 case OP_CHECKREWARD:
                 {
-                    if (stack.size() < 6)
-                    {
-                        return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
-                    }
-
                     std::vector<plc::Certificate> certs;
-                    std::vector<std::vector<unsigned char> > pubkeys;
-                    std::vector<std::vector<unsigned char> > signatures;
+                    plc::CertParameters params;
 
-                    bool fSuccess = getPlcSpecific(stack, flags, sigversion,
-                                        certs, pubkeys, signatures, serror);
-                    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
+                    if (!loadPlcCerts(stack, pbegincodehash, pend, flags,
+                                      checker, sigversion,
+                                      certs, params, serror))
                     {
-                        // error already set
+                        // error is already set
                         return false;
                     }
 
-                    // validate certificate
-                    plc::Validator validator;
-                    plc::CertParameters params;
-                    fSuccess = fSuccess && validator.validateChainOfCerts(certs, pubkeys, params);
+                    bool fSuccess = checker.CheckReward(certs, params, serror);
                     if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
                     {
-                        // bad chain
-                        LogPrintf("Validate chain of certs failed <%s>\n", __func__);
-                        return set_error(serror, SCRIPT_ERR_BAD_CERTIFICATE);
-                    }
-
-                    // Subset of script starting at the most recent codeseparator
-                    CScript scriptCode(pbegincodehash, pend);
-                    fSuccess = fSuccess && validator.verifyCertSignatures(signatures, pubkeys,
-                                                                          params, scriptCode, checker);
-                    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
-                    {
-                        // bad signatures
-                        LogPrintf("Incorrect cert signatures <%s>\n", __func__);
-                        return set_error(serror, SCRIPT_ERR_BAD_SIGNATURES);
-                    }
-
-                    fSuccess = fSuccess && checker.CheckReward(certs, params, serror);
-                    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
-                    {
+                        // error is already set
                         return false;
                     }
 
@@ -1146,43 +1200,15 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
 
                 case OP_CHECKSUPER:
                 {
-                    if (stack.size() < 6)
-                    {
-                        return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
-                    }
-
                     std::vector<plc::Certificate> certs;
-                    std::vector<std::vector<unsigned char> > pubkeys;
-                    std::vector<std::vector<unsigned char> > signatures;
-
-                    bool fSuccess = getPlcSpecific(stack, flags, sigversion,
-                                        certs, pubkeys, signatures, serror);
-                    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
-                    {
-                        // error already set
-                        return false;
-                    }
-
-                    // validate certificate
-                    plc::Validator validator;
                     plc::CertParameters params;
-                    fSuccess = fSuccess && validator.validateChainOfCerts(certs, pubkeys, params);
-                    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
-                    {
-                        // no reward
-                        LogPrintf("Validate chain of certs failed <%s>\n", __func__);
-                        return set_error(serror, SCRIPT_ERR_BAD_CERTIFICATE);
-                    }
 
-                    // Subset of script starting at the most recent codeseparator
-                    CScript scriptCode(pbegincodehash, pend);
-                    fSuccess = fSuccess && validator.verifyCertSignatures(signatures, pubkeys,
-                                                                          params, scriptCode, checker);
-                    if (!fSuccess && (flags & SCRIPT_VERIFY_REWARD))
+                    if (!loadPlcCerts(stack, pbegincodehash, pend, flags,
+                                      checker, sigversion,
+                                      certs, params, serror))
                     {
-                        // bad signatures
-                        LogPrintf("Incorrect cert signatures <%s>\n", __func__);
-                        return set_error(serror, SCRIPT_ERR_BAD_SIGNATURES);
+                        // error is already set
+                        return false;
                     }
 
                     // cert is ok, check flags
@@ -1194,6 +1220,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack,
                             return set_error(serror, SCRIPT_ERR_BAD_CERTIFICATE);
                         }
 
+                        // error is already set
                         return false;
                     }
 

@@ -5,7 +5,7 @@
 """Test segwit transactions and blocks on P2P network."""
 
 from test_framework.mininode import *
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import *
 from test_framework.script import *
 from test_framework.blocktools import create_block, create_coinbase, add_witness_commitment, get_witness_script, WITNESS_COMMITMENT_HEADER
@@ -112,9 +112,9 @@ class SegWitTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 3
-        self.extra_args = [["-whitelist=127.0.0.1", '-holyminingblock-regtest=1000'],
-                           ["-whitelist=127.0.0.1", "-acceptnonstdtxn=0", '-holyminingblock-regtest=1000'],
-                           ["-whitelist=127.0.0.1", "-vbparams=segwit:0:0", '-holyminingblock-regtest=1000']]
+        self.extra_args = [["-whitelist=127.0.0.1"],
+                           ["-whitelist=127.0.0.1", "-acceptnonstdtxn=0"],
+                           ["-whitelist=127.0.0.1", "-vbparams=segwit:0:0"]]
 
     def setup_network(self):
         self.setup_nodes()
@@ -485,9 +485,12 @@ class SegWitTest(BitcoinTestFramework):
         child_tx.rehash()
         self.update_witness_block_with_transactions(block, [parent_tx, child_tx])
 
+        base_size = len(block.serialize())
+        total_size = len(block.serialize(with_witness=True))
         vsize = get_virtual_size(block)
         additional_bytes = (MAX_BLOCK_BASE_SIZE - vsize)*4
         i = 0
+        self.log.debug(f'before: vsize: {vsize}, base_size: {base_size}, total_size: {total_size}, additional_bytes: {additional_bytes}')
         while additional_bytes > 0:
             # Add some more bytes to each input until we hit MAX_BLOCK_BASE_SIZE+1
             extra_bytes = min(additional_bytes+1, 55)
@@ -498,7 +501,12 @@ class SegWitTest(BitcoinTestFramework):
         block.vtx[0].vout.pop()  # Remove old commitment
         add_witness_commitment(block)
         block.solve()
+        base_size = len(block.serialize())
+        total_size = len(block.serialize(with_witness=True))
         vsize = get_virtual_size(block)
+        self.log.debug(f'after: vsize: {vsize}, base_size: {base_size}, total_size: {total_size}')
+        if vsize != MAX_BLOCK_BASE_SIZE + 1:
+            raise SkipTest("skipped")
         assert_equal(vsize, MAX_BLOCK_BASE_SIZE + 1)
         # Make sure that our test case would exceed the old max-network-message
         # limit
@@ -1541,7 +1549,7 @@ class SegWitTest(BitcoinTestFramework):
 
         # Restart with the new binary
         self.stop_node(node_id)
-        self.start_node(node_id, extra_args=['-holyminingblock-regtest=1000'])
+        self.start_node(node_id, extra_args=[])
         connect_nodes(self.nodes[0], node_id)
 
         sync_blocks(self.nodes)

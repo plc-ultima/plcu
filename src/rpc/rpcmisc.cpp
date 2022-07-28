@@ -7,6 +7,7 @@
 #include "chain.h"
 #include "clientversion.h"
 #include "core_io.h"
+#include "consensus/tx_verify.h"
 #include "init.h"
 #include "validation.h"
 #include "httpserver.h"
@@ -15,9 +16,11 @@
 #include "rpc/blockchain.h"
 #include "rpc/rpcserver.h"
 #include "timedata.h"
+#include "txdb.h"
 #include "util.h"
 #include "utilstrencodings.h"
 #include "policy/policy.h"
+#include "validation.h"
 #ifdef ENABLE_WALLET
 #include "wallet/rpcwallet.h"
 #include "wallet/wallet.h"
@@ -31,6 +34,8 @@
 #endif
 
 #include <univalue.h>
+
+#include <boost/thread/thread.hpp> // boost::thread::interrupt
 
 /**
  * @note Do not add or change anything in the information returned by this
@@ -651,7 +656,531 @@ UniValue echo(const JSONRPCRequest& request)
     return request.params;
 }
 
+//******************************************************************************
+//******************************************************************************
+UniValue getstatistics(const JSONRPCRequest & request)
+{
+    if (request.fHelp || request.params.size() != 1)
+    {
+        throw std::runtime_error(
+            "getstatistics address\n"
+            "\nGet address statistics.\n"
+            "\nArguments:\n"
+            "1. \"address\"     (string, required) recipient addresses\n"
+            "\nResult:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getstatistics", "")
+            + HelpExampleRpc("getstatistics", ""));
+    }
+
+    const CBitcoinAddress address(request.params[0].get_str());
+    if (!address.IsValid())
+    {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid PLC Ultima address");
+    }
+
+    const CScript scriptPubKey = GetScriptForDestination(CBitcoinAddress(address).Get(Params()));
+
+    uint32_t count       = 0;
+    CAmount  minAmount   = std::numeric_limits<CAmount>::max();
+    CAmount  maxAmount   = 0;
+    CAmount  totalAmount = 0;
+    {
+        LOCK(cs_main);
+
+        FlushStateToDisk();
+
+
+        std::unique_ptr<CCoinsViewCursor> pcursor(pcoinsdbview->Cursor());
+        for (; pcursor->Valid(); pcursor->Next())
+        {
+            boost::this_thread::interruption_point();
+            COutPoint key;
+            Coin coin;
+            if (!pcursor->GetKey(key) || !pcursor->GetValue(coin))
+            {
+                JSONRPCError(RPC_INTERNAL_ERROR, "oops");
+            }
+
+            if (coin.out.scriptPubKey == scriptPubKey)
+            {
+                ++count;
+                minAmount    = std::min(minAmount, coin.out.nValue);
+                maxAmount    = std::max(maxAmount, coin.out.nValue);
+                totalAmount += coin.out.nValue;
+            }
+        }
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("count",   static_cast<int>(count)));
+    result.push_back(Pair("minimum", static_cast<int64_t>(minAmount)));
+    result.push_back(Pair("minimum", static_cast<double>(minAmount)/COIN));
+    result.push_back(Pair("maximum", static_cast<int64_t>(maxAmount)));
+    result.push_back(Pair("maximum", static_cast<double>(maxAmount)/COIN));
+    result.push_back(Pair("total",   static_cast<int64_t>(totalAmount)));
+    result.push_back(Pair("total",   static_cast<double>(totalAmount)/COIN));
+    result.push_back(Pair("average", static_cast<int64_t>(totalAmount/count)));
+    result.push_back(Pair("average", static_cast<double>(totalAmount/count)/COIN));
+    return result;
+}
+
+//******************************************************************************
+//******************************************************************************
 uint256 sendTransaction(const std::string & strtx, const CAmount & nMaxRawTxFee, const bool isDryrun);
+
+// TODO duplicate
+struct CUpdatedBlock
+{
+    uint256 hash;
+    int height;
+};
+
+extern std::mutex cs_blockchange;
+extern std::condition_variable cond_blockchange;
+extern CUpdatedBlock latestblock;
+
+//******************************************************************************
+//******************************************************************************
+UniValue splittxout(const JSONRPCRequest & request)
+{
+#ifndef ENABLE_WALLET
+    throw std::runtime_error("wallet must be enabled");
+    return UniValue(UniValue::VNULL);
+#else
+
+    if (request.fHelp || request.params.size() != 3)
+    {
+        throw std::runtime_error(
+            "splittxout txid n count\n"
+            "\nSplit txout to specified count of outputs\n"
+            "\nArguments:\n"
+            "1. \"txid\"        (string, required) transaction id\n"
+            "2. \"n\"           (number, required) output number\n" // inputs less than amount, sort from min to max,
+            "3. \"count\"       (number, required) count of outputs\n"
+            "\nResult:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("splittxout", "")
+            + HelpExampleRpc("splittxout", ""));
+    }
+
+    RPCTypeCheck(request.params, { UniValue::VSTR, UniValue::VNUM, UniValue::VNUM});
+
+    LOCK(cs_main);
+
+    std::string strHash = request.params[0].get_str();
+    uint256 hash(uint256S(strHash));
+    int n     = request.params[1].get_int();
+    int count = request.params[2].get_int();
+
+    COutPoint out(hash, n);
+
+    Coin coin;
+    if (!pcoinsTip->GetCoin(out, coin))
+    {
+        throw JSONRPCError(RPC_TYPE_ERROR, "No txid:n");
+    }
+
+    uint32_t txcount = 0;
+
+    CAmount sourceAmount = coin.out.nValue;
+    CAmount destAmount   = coin.out.nValue / count;
+
+    CTxOut txout(destAmount, coin.out.scriptPubKey);
+    if (IsDust(txout, ::dustRelayFee))
+    {
+        throw JSONRPCError(RPC_TYPE_ERROR, "dust");
+    }
+
+    CBasicKeyStore dummyKeyStore;
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+
+    while (count > 0)
+    {
+        CMutableTransaction tx;
+        // in
+        tx.vin.emplace_back(CTxIn(hash, n));
+        // change
+        tx.vout.emplace_back(CTxOut(0, coin.out.scriptPubKey));
+
+        // dummy sign, only one input
+        SignatureData sigdata;
+        if (!ProduceSignature(DummySignatureCreator(&dummyKeyStore), coin.out.scriptPubKey, sigdata))
+        {
+            JSONRPCError(RPC_INTERNAL_ERROR, "oops ^ 2");
+        }
+        UpdateTransaction(tx, 0, sigdata);
+
+        // use 100 outs per tx
+        CAmount  feeNeeded = 0;
+        for (uint32_t i = 0; i < 100; ++i, --count)
+        {
+            tx.vout.emplace_back(CTxOut(destAmount, coin.out.scriptPubKey));
+
+            uint32_t bytes = GetVirtualTransactionSize(tx);
+            CAmount  fee   = ::minRelayTxFee.GetFee(bytes);
+
+            // magic 1.3
+            fee *= 1.3;
+
+            if (sourceAmount < fee + destAmount)
+            {
+                // done
+                tx.vout.pop_back();
+                count = 0;
+                break;
+            }
+
+            sourceAmount -= destAmount;
+            feeNeeded     = fee;
+        }
+
+        // fix change
+        sourceAmount      -= feeNeeded;
+        tx.vout[0].nValue  = sourceAmount;
+
+        // sign
+        for (auto & vin : tx.vin)
+        {
+            vin.scriptSig = CScript();
+            vin.scriptWitness.SetNull();
+        }
+
+        // only one input
+        CTransaction txc(tx);
+        if (!ProduceSignature(TransactionSignatureCreator(pwallet, &txc, 0, 0, SIGHASH_ALL), coin.out.scriptPubKey, sigdata))
+        {
+            throw JSONRPCError(RPC_WALLET_ERROR, "Signing transaction failed");
+        }
+
+        UpdateTransaction(tx, 0, sigdata);
+
+        // send and next iterations input
+        hash = sendTransaction(EncodeHexTx(tx), maxTxFee, false);
+        n    = 0;
+
+        ++txcount;
+
+        if (txcount % 20 == 0)
+        {
+            // wait for block
+            std::cout << txcount << " tx" << std::endl;
+        }
+    }
+
+    UniValue v(UniValue::VOBJ);
+    return v;
+
+#endif
+}
+
+//******************************************************************************
+//******************************************************************************
+UniValue compressoutputs(const JSONRPCRequest & request)
+{
+#ifndef ENABLE_WALLET
+    throw std::runtime_error("wallet must be enabled");
+    return UniValue(UniValue::VNULL);
+#else
+
+    if (request.fHelp || request.params.size() < 1)
+    {
+        throw std::runtime_error(
+            "compressoutputs address amount send count verbose\n"
+            "\nMake transaction with one compressed output.\n"
+            "\nArguments:\n"
+            "1. \"address\"     (string, required) recipient addresses\n"
+            "2. \"inputs\"      (number, required) count of inputs\n" // inputs less than amount, sort from min to max,
+            "3. \"send\"        (boolean, optional) send transaction after sign (default false)\n"
+            "4. \"count\"       (number, optional) count of transactions (default 1)\n"
+            "5. \"verbose\"     (boolean, optional) extra info (default false)\n"
+            "\nResult:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("compressoutputs", "")
+            + HelpExampleRpc("compressoutputs", ""));
+    }
+
+    RPCTypeCheck(request.params, { UniValue::VSTR, UniValue::VNUM, UniValue::VBOOL, UniValue::VNUM, UniValue::VBOOL }, true);
+
+    const CBitcoinAddress address(request.params[0].get_str());
+    if (!address.IsValid())
+    {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid PLC Ultima address");
+    }
+
+    const CScript destinationScript = GetScriptForDestination(CBitcoinAddress(address).Get(Params()));
+
+    const uint32_t inputsCount = request.params[1].get_int();
+
+    bool needSend = false;
+    if (request.params.size() > 2 && request.params[2].get_bool())
+    {
+        needSend = true;
+    }
+
+    bool needSign = needSend;
+
+    uint32_t count = 1;
+    if (request.params.size() > 3)
+    {
+        count = request.params[3].get_int();
+        if (count == 0)
+        {
+            count = 1;
+        }
+    }
+
+    bool isVerbose = false;
+    if (request.params.size() > 4 && request.params[4].get_bool())
+    {
+        isVerbose = true;
+    }
+
+    std::chrono::system_clock::time_point t1;
+    std::chrono::system_clock::time_point t2;
+    std::chrono::system_clock::time_point t3;
+    std::chrono::system_clock::time_point t4;
+    std::chrono::system_clock::time_point t5;
+    std::chrono::system_clock::time_point t6;
+    std::chrono::system_clock::time_point t7;
+
+    typedef std::tuple<uint256, uint32_t, CAmount, uint32_t> coin_t;
+    std::vector<coin_t> coins;
+    CAmount  totalAmount = 0;
+    uint32_t totalCount  = 0;
+
+    LOCK(cs_main);
+
+    {
+        t1 = std::chrono::high_resolution_clock::now();
+
+        FlushStateToDisk();
+
+        t2 = std::chrono::high_resolution_clock::now();
+
+        std::unique_ptr<CCoinsViewCursor> pcursor(pcoinsdbview->Cursor());
+        for (; pcursor->Valid(); pcursor->Next())
+        {
+            boost::this_thread::interruption_point();
+            COutPoint key;
+            Coin coin;
+            if (!pcursor->GetKey(key) || !pcursor->GetValue(coin))
+            {
+                JSONRPCError(RPC_INTERNAL_ERROR, "oops");
+            }
+
+            if (chainActive.Height() - coin.nHeight < 6)
+            {
+                continue;
+            }
+
+            if (coin.out.scriptPubKey == destinationScript)
+            {
+                totalAmount += coin.out.nValue;
+                coins.emplace_back(std::make_tuple(key.hash, key.n, coin.out.nValue, static_cast<uint32_t>(coin.nHeight)));
+            }
+        }
+
+    }
+
+    totalCount = coins.size();
+
+    t3 = std::chrono::high_resolution_clock::now();
+
+    // sort
+    std::sort(coins.begin(), coins.end(), [](const coin_t & l, const coin_t & r) { return std::get<3>(l) > std::get<3>(r); });
+
+    t4 = std::chrono::high_resolution_clock::now();
+
+    LogPrintf("Compresor: make %d transactions with %d inputs\n", count, inputsCount);
+
+    // make
+    std::mutex txLocker;
+    std::mutex cnLocker;
+    std::vector<CMutableTransaction> transactions;
+
+    boost::thread_group group;
+
+    for (uint32_t i = 0; i < std::thread::hardware_concurrency() / 2; ++i)
+    {
+        group.create_thread([&coins, &cnLocker, &transactions, &txLocker, destinationScript, inputsCount](){
+
+            CBasicKeyStore dummyKeyStore;
+            SignatureData dummySig;
+            ProduceSignature(DummySignatureCreator(&dummyKeyStore), destinationScript, dummySig);
+
+            while (true)
+            {
+                CMutableTransaction tx;
+                CAmount  txAmount  = 0;
+                CAmount  feeNeeded = 0;
+                uint32_t bytes     = 0;
+
+                tx.vout.emplace_back(CTxOut(txAmount, destinationScript));
+
+                for (uint32_t ii = 0; ii < inputsCount; ++ii)
+                {
+                    coin_t ct;
+                    {
+                        std::lock_guard<std::mutex> l(cnLocker);
+
+                        if (coins.empty())
+                        {
+                            if (tx.vin.size() == 0)
+                            {
+                                // done
+                                return;
+                            }
+
+                            // no more coins
+                            break;
+                        }
+
+                        ct = coins.back();
+                        coins.pop_back();
+                    }
+
+                    // select inputs
+                    txAmount += std::get<2>(ct);
+                    tx.vin.emplace_back(CTxIn(std::get<0>(ct), std::get<1>(ct), dummySig.scriptSig));
+                }
+
+                bytes     = GetVirtualTransactionSize(tx, GetTransactionSigOpCost(tx, pcoinsdbview, STANDARD_SCRIPT_VERIFY_FLAGS));
+                feeNeeded = ::minRelayTxFee.GetFee(bytes);
+
+                // magic 1.4
+                feeNeeded *= 1.4;
+
+                tx.vout[0].nValue = txAmount - feeNeeded;
+                if (txAmount <= feeNeeded || IsDust(tx.vout[0], ::dustRelayFee))
+                {
+                    JSONRPCError(RPC_INTERNAL_ERROR, "oops, dust. need more many");
+                }
+
+                {
+                    std::lock_guard<std::mutex> l(txLocker);
+                    transactions.emplace_back(tx);
+                    if (transactions.size() % 10 == 0)
+                    {
+                        LogPrintf("Compresor: %d transactions ready\n", transactions.size());
+                    }
+                }
+            }
+
+        });
+    }
+
+    group.join_all();
+
+    LogPrintf("Compresor: %d transactions ready\n", transactions.size());
+
+    t5 = std::chrono::high_resolution_clock::now();
+
+    // sign
+    bool keyFound = false;
+    if (needSign)
+    {
+        CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+        CKeyID keyId;
+        CBitcoinAddress(address).GetKeyID(keyId);
+        CKey key;
+        if (!pwallet->GetKey(keyId, key))
+        {
+            needSend = false;
+        }
+
+        keyFound = true;
+
+        // sign
+        for (CMutableTransaction & tx : transactions)
+        {
+            for (auto & vin : tx.vin)
+            {
+                vin.scriptSig = CScript();
+                vin.scriptWitness.SetNull();
+            }
+
+            CTransaction txConst(tx);
+
+            for (uint32_t iii = 0; iii < txConst.vin.size(); ++iii)
+            {
+                SignatureData sigdata;
+                if (!ProduceSignature(TransactionSignatureCreator(pwallet, &txConst, iii, txConst.vout[0].nValue, SIGHASH_ALL), destinationScript, sigdata))
+                {
+                    throw JSONRPCError(RPC_WALLET_ERROR, "Signing transaction failed");
+                }
+
+                UpdateTransaction(tx, iii, sigdata);
+            }
+        }
+    }
+
+    t6 = std::chrono::high_resolution_clock::now();
+
+    // send
+    if (needSend)
+    {
+        for (CMutableTransaction & tx : transactions)
+        {
+            // uint256 txid =
+            sendTransaction(EncodeHexTx(tx), maxTxFee, false);
+        }
+    }
+
+    t7 = std::chrono::high_resolution_clock::now();
+
+    UniValue result(UniValue::VARR);
+
+    result.push_back("flush -- " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()));
+    result.push_back("get -- "   + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count())
+                     + " ( " + std::to_string(totalCount) + " outputs, total amount " + std::to_string(totalAmount) + " )");
+    result.push_back("sort -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()));
+    result.push_back("make -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count()));
+    result.push_back("sign -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count()));
+    result.push_back("send -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count()));
+
+    if (needSign && !keyFound)
+    {
+        result.push_back("no key for " + address.ToString());
+    }
+
+    if (isVerbose)
+    {
+        std::ofstream of;
+        fs::path path = GetDataDir(true) / "unsigned.txt";
+        of.open(path.string().c_str(), std::ios_base::out | std::ios_base::trunc);
+        if (!of.is_open())
+        {
+            result.push_back(path.string() + " not opened");
+        }
+        else
+        {
+            for (const CMutableTransaction & tx : transactions)
+            {
+                of << "\"" << EncodeHexTx(tx) << "\",";
+
+                UniValue extra(UniValue::VARR);
+
+                for (const CTxIn & in : tx.vin)
+                {
+                    UniValue obj(UniValue::VOBJ);
+                    obj.push_back(Pair("txid", in.prevout.hash.ToString()));
+                    obj.push_back(Pair("vout", static_cast<int>(in.prevout.n)));
+                    obj.push_back(Pair("scriptPubKey", HexStr(destinationScript)));
+                    obj.push_back(Pair("amount", 0));
+                    extra.push_back(obj);
+                }
+
+                of << extra.write() << std::endl;
+                // result.push_back(EncodeHexTx(tx));
+            }
+            of.close();
+        }
+    }
+
+    return result;
+#endif
+}
 
 //******************************************************************************
 //******************************************************************************
@@ -667,7 +1196,7 @@ UniValue compressmineoutputs(const JSONRPCRequest & request)
     if (request.fHelp || request.params.size() < 2)
     {
         throw std::runtime_error(
-            "compressmineoutputs address amount minamount send\n"
+            "compressmineoutputs address amount send count\n"
             "\nMake transaction with one compressed output.\n"
             "\nArguments:\n"
             "1. \"address\"     (string, required) recipient addresses\n"
@@ -836,7 +1365,9 @@ static const CRPCCommand commands[] =
     { "util",               "createmultisig",         &createmultisig,         true,  {"nrequired","keys"} },
     { "util",               "verifymessage",          &verifymessage,          true,  {"address","signature","message"} },
     { "util",               "signmessagewithprivkey", &signmessagewithprivkey, true,  {"privkey","message"} },
-    { "util",               "compressmineoutputs",    &compressmineoutputs,    true,  {"minvalue","send"} },
+    { "util",               "compressmineoutputs",    &compressmineoutputs,    true,  {"address","amount","send","count"} },
+    { "util",               "compressoutputs",        &compressoutputs,        true,  {"address","amount","send","count","verbose"} },
+    { "util",               "getstatistics",          &getstatistics,          true,  {"address"} },
 
     /* Not shown in help */
     { "hidden",             "setmocktime",            &setmocktime,            true,  {"timestamp"}},

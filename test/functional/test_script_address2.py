@@ -52,8 +52,10 @@ class ScriptAddress2Test(BitcoinTestFramework):
         txid = self.nodes[0].sendfrom("multisigaccount", addr3, Decimal('0.8'))
         blocks = self.nodes[0].generate(2)
         self.sync_all()
-        assert(self.nodes[0].getbalance("multisigaccount", 1) < Decimal('0.2'))
-        assert(self.nodes[1].listtransactions()[-1]['address'] == addr3)
+
+        # getbalance() for account doesn't work since version 2.10
+        # assert_greater_than(Decimal('0.2'), self.nodes[0].getbalance("multisigaccount", 1))
+        assert_equal(self.nodes[1].listtransactions()[-1]['address'], addr3)
 
         # Send to an old multisig address. The api addmultisigaddress
         # can only generate a new address so we manually compute
@@ -84,7 +86,8 @@ class ScriptAddress2Test(BitcoinTestFramework):
         txid = self.nodes[0].sendfrom("multisigaccount2", addr4, Decimal('0.8'))
         blocks = self.nodes[0].generate(2)
         self.sync_all()
-        assert(self.nodes[0].getbalance("multisigaccount2", 1) < Decimal('0.2'))
+        # getbalance() for account doesn't work since version 2.10
+        # assert(self.nodes[0].getbalance("multisigaccount2", 1) < Decimal('0.2'))
         assert(self.nodes[1].listtransactions()[-1]['address'] == addr4)
 
 

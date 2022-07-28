@@ -45,7 +45,6 @@ public:
     virtual bool HaveWatchOnly() const =0;
 
     virtual bool hasTaxFreeCert() const = 0;
-    virtual bool hasMinerCert() const = 0;
     virtual bool getCert(std::vector<std::vector<unsigned char> > & pubkeys,
                          std::vector<plc::Certificate> & certs) const = 0;
     virtual bool setCert(const std::vector<std::vector<unsigned char> > & pubkeys,
@@ -119,7 +118,6 @@ public:
     virtual bool HaveWatchOnly() const override;
 
     virtual bool hasTaxFreeCert() const override;
-    virtual bool hasMinerCert() const override;
     virtual bool getCert(std::vector<std::vector<unsigned char> > & pubkeys,
                          std::vector<plc::Certificate> & certs) const override;
     virtual bool setCert(const std::vector<std::vector<unsigned char> > & pubkeys,

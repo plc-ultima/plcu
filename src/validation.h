@@ -280,9 +280,9 @@ bool GetTransaction(const uint256 &hash, CTransactionRef &tx, const Consensus::P
 /** Find the best known block, and make it the tip of the block chain */
 bool ActivateBestChain(CValidationState& state, const CChainParams& chainparams, std::shared_ptr<const CBlock> pblock = std::shared_ptr<const CBlock>());
 
-/** Block subsidy and block award amounts calculation */
-CAmount GetBlockSubsidy(const int nHeight, const CAmount & nFees,
-                        const Consensus::Params & consensusParams);
+/** Block subsidy and block award amounts calculation, pair <subsidy, is_emission>*/
+std::pair<CAmount, bool> GetBlockSubsidy(const int nHeight, const CAmount & nFees,
+                                         const Consensus::Params & consensusParams);
 
 /** Guess verification progress (as a fraction between 0.0=genesis and 1.0=current tip). */
 double GuessVerificationProgress(const ChainTxData& data, CBlockIndex* pindex);
@@ -404,9 +404,6 @@ bool ReadBlockFromDisk(CBlock& block, const CDiskBlockPos& pos, const Consensus:
 bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus::Params& consensusParams);
 
 /** Functions for validating blocks and updating the block tree */
-
-/** Total amount */
-std::pair<CAmount, uint32_t> getTotalAmount();
 
 /** Context-independent validity checks */
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true, bool fCheckMerkleRoot = true);

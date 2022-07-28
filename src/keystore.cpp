@@ -126,13 +126,6 @@ bool CBasicKeyStore::hasTaxFreeCert() const
 
 //******************************************************************************
 //******************************************************************************
-bool CBasicKeyStore::hasMinerCert() const
-{
-    return (m_taxFreeParams.flags & plc::holyShovel) == plc::holyShovel;
-}
-
-//******************************************************************************
-//******************************************************************************
 bool CBasicKeyStore::getCert(std::vector<std::vector<unsigned char> > & pubkeys,
                              std::vector<plc::Certificate> & certs) const
 {

@@ -818,6 +818,14 @@ void runCommand(const std::string& strCommand)
         LogPrintf("runCommand error: system(%s) returned %d\n", strCommand, nErr);
 }
 
+extern boost::thread_group g_threadGroup;
+
+template<typename F>
+void CreateThread(F & func)
+{
+    g_threadGroup.create_thread(func);
+}
+
 void RenameThread(const char* name)
 {
 #if defined(PR_SET_NAME)

@@ -27,6 +27,7 @@ FREE_BEN               = 0x00020000
 SILVER_HOOF            = 0x00040000
 SUPER_TX               = 0x00080000  # shadowEmperor in cpp
 ALLOW_MINING           = 0x00100000  # holyShovel in cpp
+MASTER_OF_TIME         = 0x00200000  # masterOfTime in cpp
 TOTAL_PUBKEYS_COUNT_MASK     = 0x0000f000
 REQUIRED_PUBKEYS_COUNT_MASK  = 0xf0000000
 
@@ -87,7 +88,7 @@ def process_reject_message(test_node, reject_reason, accepted):
     test_node.reject_message = None
 
 
-def send_tx(node, test_node, tx, accepted, reject_reason=None, try_mine_in_block=True, verbose=False):
+def send_tx(node, test_node, tx, accepted=True, reject_reason=None, try_mine_in_block=True, verbose=False):
     if verbose:
         for input in tx.vin:
             txid_hex = '%064x' % (input.prevout.hash)
@@ -126,11 +127,14 @@ def send_tx(node, test_node, tx, accepted, reject_reason=None, try_mine_in_block
     return tx.hash if accepted else None
 
 
-def send_block(node, test_node, block, accepted, reject_reason = None):
+def send_block(node, test_node, block, accepted, reject_reason = None, verbose=True):
     bestblockhash_before = node.getbestblockhash()
     assert_equal(int(bestblockhash_before, 16), block.hashPrevBlock)
     block_message = msg_block(block)
-    logger.debug('Sending block {}: {}'.format(block.hash, bytes_to_hex_str(block_message.serialize())))
+    if verbose:
+        logger.debug('Sending block {}: {}; {}'.format(block.hash, bytes_to_hex_str(block_message.serialize()), block))
+    else:
+        logger.debug(f'Sending block {block.hash}')
     test_node.send_message(block_message)
     test_node.sync_with_ping()
     assert_equal(bestblockhash_before == node.getbestblockhash(), not accepted)
@@ -158,11 +162,33 @@ def generate_outpoints(node, count, amount, address):
     return (outpoints, fee_sum)
 
 
-def compose_tx(input_utxos, input_key, dest_scripts_and_amounts):
+def compose_tx(input_utxos, input_key, dest_scripts_and_amounts, seq=0xffffffff, locktime=0):
     tx3 = CTransaction()
+    tx3.nLockTime = locktime
 
     for input_utxo in input_utxos:
-        tx3.vin.append(CTxIn(input_utxo, GetP2PKHScript(hash160(input_key.get_pubkey())), 0xffffffff))
+        tx3.vin.append(CTxIn(input_utxo, GetP2PKHScript(hash160(input_key.get_pubkey())), seq))
+
+    for dest_script in dest_scripts_and_amounts:
+        amount = dest_scripts_and_amounts[dest_script]
+        tx3.vout.append(CTxOut(ToSatoshi(amount), dest_script))
+
+    for i in range(len(input_utxos)):
+        (sig_hash, err) = SignatureHash(CScript(tx3.vin[i].scriptSig), tx3, i, SIGHASH_ALL)
+        assert (err is None)
+        signature = input_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+        tx3.vin[i].scriptSig = CScript([signature, input_key.get_pubkey()])
+
+    tx3.rehash()
+    return tx3
+
+
+def compose_tx_spending_locked_outputs(input_utxos, input_key, dest_scripts_and_amounts, prev_script, locktime):
+    tx3 = CTransaction()
+    tx3.nLockTime = locktime
+
+    for input_utxo in input_utxos:
+        tx3.vin.append(CTxIn(input_utxo, prev_script, 0xfffffffe))
 
     for dest_script in dest_scripts_and_amounts:
         amount = dest_scripts_and_amounts[dest_script]
@@ -319,7 +345,7 @@ def generate_certs_pair(node, test_node, root_cert_key=None, root_cert_flags=Non
     root_cert_key = root_cert_key if root_cert_key else create_key(True, GENESIS_PRIV_KEY0_BIN)
     root_cert_name = 'root_cert'
     root_cert_flags = root_cert_flags if root_cert_flags is not None else 0
-    # print_key_verbose(root_cert_key, f'root_cert_key in {root_cert_name}')
+    print_key_verbose(root_cert_key, f'root_cert_key in {root_cert_name}')
     (outpoints, _) = generate_outpoints(node, 1, Decimal('1.03') + fee, AddressFromPubkey(root_cert_key.get_pubkey()))
     (tx2, pass_cert_key1) = compose_cert_tx(outpoints.pop(0), Decimal(1), root_cert_key, root_cert_name,
                                             root_cert_flags, block1_hash=root_cert_sig_hash, block2a=root_cert_signature,
@@ -335,16 +361,39 @@ def generate_certs_pair(node, test_node, root_cert_key=None, root_cert_flags=Non
     pass_cert_key = pass_cert_key if pass_cert_key else pass_cert_key1
     pass_cert_name = 'pass_cert'
     pass_cert_flags = pass_cert_flags if pass_cert_flags is not None else pass_cert_flag_default
+    print_key_verbose(pass_cert_key, f'pass_cert_key in {pass_cert_name}')
     (outpoints, _) = generate_outpoints(node, 1, Decimal('1.03') + fee, AddressFromPubkey(pass_cert_key.get_pubkey()))
     (tx2, super_key1) = compose_cert_tx(outpoints.pop(0), Decimal(1), pass_cert_key, pass_cert_name,
                                         pass_cert_flags, block1_hash=pass_cert_sig_hash, block2a=pass_cert_signature,
                                         parent_key_for_block2=pass_cert_sig_key)
     pass_cert_hash = pass_cert_hash if pass_cert_hash else send_tx(node, test_node, tx2, True)
     super_key = super_key if super_key else super_key1
+    print_key_verbose(super_key, f'super_key')
     if pass_cert_revoked:
         prev_scriptpubkey = CScript(hex_str_to_bytes(node.getrawtransaction(pass_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
         (tx2a, _) = compose_cert_tx(COutPoint(int(pass_cert_hash, 16), 0), Decimal('0.9'), pass_cert_key,
                                     pass_cert_name, pass_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
         send_tx(node, test_node, tx2a, True)
 
+    logger.debug(f'root_cert_hash: {root_cert_hash}, pass_cert_hash: {pass_cert_hash}')
     return (root_cert_hash, pass_cert_hash, super_key)
+
+
+def restart_node_with_cert(test_fr, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None, accepted=True, gen_block=True, index=0, next_index=1):
+    assert_greater_than_or_equal(test_fr.num_nodes, 2)
+    node0 = test_fr.nodes[index]
+    node1 = test_fr.nodes[next_index]
+    test_fr.sync_all()
+    if use_cert:
+        write_taxfree_cert_to_file(test_fr.taxfree_cert_filename, super_key_pubkey, root_cert_hash, pass_cert_hash)
+    test_fr.stop_node(index)
+    more_args = [f'-taxfreecert={test_fr.taxfree_cert_filename}'] if use_cert else []
+    test_fr.start_node(index, extra_args=test_fr.extra_args[index] + more_args)
+    connect_nodes(node0, next_index)
+    if use_cert and accepted:
+        assert_equal(node0.getwalletinfo()['taxfree_certificate'], test_fr.taxfree_cert_filename)
+    elif not use_cert:
+        assert_not_in('taxfree_certificate', node0.getwalletinfo())
+    if gen_block:
+        node1.generate(1)
+        test_fr.sync_all()

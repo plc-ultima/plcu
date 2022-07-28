@@ -108,17 +108,13 @@ class WalletAccountsTest(BitcoinTestFramework):
         for account in accounts:
             address = node.getaccountaddress(account)
             assert(address != account_addresses[account])
-            # assert_equal(node.getreceivedbyaccount(account), 2) # TODO: Bug https://rm.dramaco.tech/issues/543
             account_balance = node.getbalance(account)
-            if not account_balance:
-                raise SkipTest('Bug 543') # TODO: Bug https://rm.dramaco.tech/issues/543
             assert_greater_than(account_balance, 0)
             node.move(account, "", account_balance)
 
         node.generate(101)
 
         # The same node @node both pays fees as user and receives them as miner, calculate it:
-        # print('Here: balance: {}, fees1 ({}): {}, fees2 ({}): {}, fees1m: {}, fees2m: {}'.format(node.getbalance(), sum(fees1), fees1, sum(fees2), fees2, sum([max(f / 2, Decimal('0.005')) for f in fees1]), sum([max(f / 2, Decimal('0.005')) for f in fees2])))
         expected_balance = BASE_CB_AMOUNT * 100 + Decimal('0.005') * 3 - sum(fees1) - sum(fees2) + sum([max(f / 2, Decimal('0.005')) for f in fees1]) + sum([max(f / 2, Decimal('0.005')) for f in fees2])
         expected_account_balances = { "": expected_balance }
         for account in accounts:

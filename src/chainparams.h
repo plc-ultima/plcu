@@ -99,9 +99,8 @@ public:
     const std::vector<std::pair<CScript, double> > & graveAddresses() const   { return consensus.graveAddresses; }
     bool isGrave(const CScript & scriptPubKey) const;
 
-    uint32_t maxCaBlock() const { return consensus.maxCaBlock; }
-
-    uint32_t holyMiningBlock() const;
+    uint32_t maxCaBlock() const;
+    uint32_t startTotalNgBlock() const;
 
     void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout);
 protected:

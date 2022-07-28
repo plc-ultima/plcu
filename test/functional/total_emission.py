@@ -9,12 +9,11 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 from test_framework.script import *
 from test_framework.certs import *
-from test_framework.blocktools import create_coinbase, create_block
+from test_framework.blocktools import create_coinbase, create_block, get_total_expected
 
 '''
 total_emission.py
 '''
-
 
 # TestNode: bare-bones "peer".
 class TestNode(NodeConnCB):
@@ -40,9 +39,8 @@ class TestNode(NodeConnCB):
 
 class TotalEmissionTest(BitcoinTestFramework):
     def set_test_params(self):
-        self.num_nodes = 2
-        self.setup_clean_chain = False
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=1000']] * self.num_nodes
+        self.num_nodes = 3
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1']] * self.num_nodes
         self.outpoints = []
         self.moneybox_utxo_amounts = {}
 
@@ -54,19 +52,98 @@ class TotalEmissionTest(BitcoinTestFramework):
         self.test_node = TestNode()
         connection = NodeConn('127.0.0.1', p2p_port(0), self.nodes[0], self.test_node)
         self.test_node.add_connection(connection)
+
+        self.test_node2 = TestNode()
+        connection2 = NodeConn('127.0.0.1', p2p_port(2), self.nodes[2], self.test_node2)
+        self.test_node2.add_connection(connection2)
+
         NetworkThread().start()
         self.test_node.wait_for_verack()
         self.test_node.sync_with_ping()
+        self.test_node2.wait_for_verack()
+        self.test_node2.sync_with_ping()
 
 
-    def compose_and_send_block(self, coinbase, tx_list, accepted, reject_reason = None):
-        coinbase.rehash()
+    def run_scenario(self, name, tx_list, total_delta=None, node_index=0, accepted=True, reject_reason=None, full_check=True, refill_mb=None, verbose=True):
+        self.log.debug(f'Run scenario {name}, total_delta: {total_delta}, refill_mb: {refill_mb} ...')
+        assert_in(node_index, [0,2])
+        node = self.nodes[node_index]
+        test_node = self.test_node if node_index == 0 else self.test_node2
+        total_delta = ToSatoshi(total_delta) if total_delta else 0
+        refill_mb = ToSatoshi(refill_mb) if refill_mb is not None else total_delta
         for tx in tx_list:
             tx.rehash()
         tmpl = self.nodes[0].getblocktemplate()
-        block = create_block(int(tmpl['previousblockhash'], 16), coinbase, tmpl['curtime'], int(tmpl['bits'], 16), VB_TOP_BITS, tx_list)
-        self.log.debug(f'block: {block}')
-        send_block(self.nodes[0], self.test_node, block, accepted, reject_reason)
+        coinbasetxn_hex = tmpl['coinbasetxn']['data']
+        coinbasetxn_orig = FromHex(CTransaction(), coinbasetxn_hex)
+        coinbasetxn_orig.vout = [ou for ou in coinbasetxn_orig.vout if ou.scriptPubKey[0] != OP_RETURN]
+        total_amount_orig = extract_total_amount_from_cb_tx(coinbasetxn_orig)
+        total_amount_correct = total_amount_orig + total_delta
+        previousblockhash = int(tmpl['previousblockhash'], 16)
+        curtime = tmpl['curtime']
+        height = tmpl['height']
+        bits = int(tmpl['bits'], 16)
+
+        if refill_mb:
+            coinbase_dup = create_coinbase(height, None, 0, refill_mb)
+            coinbasetxn_orig.vout.extend(coinbase_dup.vout[1:])
+
+        if full_check and accepted:
+            coinbasetxn_b = copy.deepcopy(coinbasetxn_orig)
+            coinbasetxn_b.vin = [coinbasetxn_b.vin[0]]
+
+            # No total amount coinbase input: rejected
+            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            send_block(node, test_node, block, False, 'bad-coinbase-without-total', verbose=verbose)
+
+            # Total amount is 1 satoshi more than required: rejected
+            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            total_amount = total_amount_correct + 1
+            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
+            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
+
+            # Total amount is 1 satoshi less than required: rejected
+            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            total_amount = total_amount_correct - 1
+            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
+            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
+
+            # Zero total amount: rejected
+            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            total_amount = 0
+            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
+            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
+
+            # Empty total amount: rejected
+            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            total_amount = None
+            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
+            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
+        else:
+            coinbasetxn = coinbasetxn_orig
+
+        # Positive scenario at the end: accepted
+        total_amount = total_amount_correct
+        set_total_amount_to_cb_tx(coinbasetxn, total_amount)
+        coinbasetxn.rehash()
+        block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+        send_block(node, test_node, block, accepted, reject_reason, verbose=verbose)
+        return total_amount
 
 
     def parse_moneybox_utxos(self, block_hash, verbose=False):
@@ -83,13 +160,27 @@ class TotalEmissionTest(BitcoinTestFramework):
             self.log.debug(f'tx_cb: {tx_cb}')
         return moneybox_utxos
 
+    def get_total_in_block(self, block_height=None):
+        node0 = self.nodes[0]
+        block_hash = node0.getblockhash(block_height) if block_height else node0.getbestblockhash()
+        block = node0.getblock(block_hash, 2)
+        height = block['height']
+        total_got = ToCoins(extract_total_amount_from_cb_tx(block['tx'][0]))
+        self.log.debug(f'total on height {height}: {total_got}')
+        return total_got
 
     def run_test(self):
+        self.taxfree_cert_filename = os.path.join(self.options.tmpdir + '/node0/regtest', 'taxfree.cert')
         node0 = self.nodes[0]
         node1 = self.nodes[1]
         self.test_node.sync_with_ping()
-        fee = Decimal('0.00001')
+        self.test_node2.sync_with_ping()
+        fee = Decimal('0.00001000')
         fee_sum = 0
+
+        (self.root_cert_hash_holy, self.pass_cert_hash_holy, self.super_key_holy) = generate_certs_pair(node0, self.test_node,
+                                                                                         pass_cert_flag_default=ALLOW_MINING)
+        node0.generate(1)
 
         # Root cert:
         genesis_key0 = create_key(True, GENESIS_PRIV_KEY0_BIN)
@@ -110,7 +201,7 @@ class TotalEmissionTest(BitcoinTestFramework):
 
         # User money:
         user_key = red_key
-        (self.outpoints, fee_gen) = generate_outpoints(node0, 20, Decimal(4500), AddressFromPubkey(user_key.get_pubkey()))
+        (self.outpoints, fee_gen) = generate_outpoints(node0, 25, Decimal(4500), AddressFromPubkey(user_key.get_pubkey()))
         fee_sum += -fee_gen
         node0.generate(1)
 
@@ -120,15 +211,54 @@ class TotalEmissionTest(BitcoinTestFramework):
             moneybox_utxos.extend(self.parse_moneybox_utxos(block_hash))
         assert_equal(len(moneybox_utxos), 1000)
 
-        height = node0.getblockcount()
-        txoutsetinfo = node0.gettxoutsetinfo()
-        total_mined = BASE_CB_AMOUNT * 100 + CB_AMOUNT_AFTER_BLOCK_100 * (height - 100)
+        total_mined = BASE_CB_AMOUNT * 100
         total_moneybox = 100 * 10 * 100
-        self.log.debug(f'height: {height}, total_mined: {total_mined}, total_moneybox: {total_moneybox}, fee_sum: {fee_sum}, txoutsetinfo: {txoutsetinfo}')
-        total_amount = txoutsetinfo['total_amount']
-        assert_equal(total_amount, total_mined + total_moneybox - fee_sum)
 
-        mint_reward = 50000
+        node0.importprivkey(SecretBytesToBase58(self.super_key_holy.get_secret()))
+        restart_node_with_cert(self, True, self.super_key_holy.get_pubkey(), self.root_cert_hash_holy, self.pass_cert_hash_holy)
+        connection = NodeConn('127.0.0.1', p2p_port(0), self.nodes[0], self.test_node)
+        self.test_node.add_connection(connection)
+
+        node1.importprivkey(SecretBytesToBase58(self.super_key_holy.get_secret()))
+        restart_node_with_cert(self, True, self.super_key_holy.get_pubkey(), self.root_cert_hash_holy, self.pass_cert_hash_holy, gen_block=False, index=1, next_index=2)
+        connect_nodes(node0, 1)
+        node0.generate(1)
+        self.sync_all()
+
+        generate_many_blocks(node0, START_TOTAL_NG_BLOCK - node0.getblockcount() - 1)
+        self.sync_all()
+        self.test_node.sync_with_ping()
+
+        node0.generate(1)  # this is the first block with total amount, check it:
+        assert_equal(self.get_total_in_block(), total_mined + total_moneybox)
+
+        self.run_scenario('empty block', [], 0, full_check=False)
+        self.run_scenario('empty block with full check', [], 0)
+        node0.generate(1)
+        self.sync_all()
+        assert_equal(self.get_total_in_block(), total_mined + total_moneybox)
+
+        amount = Decimal(4500)
+        dest_pkh = hash160(b'lord-the-son-of-a-bitch')
+        dest_script = GetP2PKHScript(dest_pkh)
+        (burn1, burn2, rest) = BurnedAndChangeAmount(amount - fee)
+        destinations = {GraveScript1(): burn1, GraveScript2(): burn2, dest_script: rest}
+        transactions = [compose_tx([self.outpoints.pop()], user_key, destinations) for _ in range(5)]
+        total_amount = ToCoins(self.run_scenario('block with regular transactions', transactions, 0))
+        node0.generate(1)
+        self.sync_all()
+        assert_equal(self.get_total_in_block(), total_mined + total_moneybox)
+
+        transactions = [compose_tx([self.outpoints.pop()], user_key, destinations) for _ in range(5)]
+        self.run_scenario('block regular transactions invalid total', transactions, 100, 0, False, 'bad-coinbase-wrong-total', refill_mb=0)
+        node0.generate(2)
+        sync_blocks(self.nodes)
+        assert_equal(self.get_total_in_block(), total_mined + total_moneybox)
+
+        height = node0.getblockcount()
+        self.log.debug(f'height: {height}, total_mined: {total_mined}, total_moneybox: {total_moneybox}, fee_sum: {fee_sum}')
+
+        mint_reward = Decimal(50000)
         mint_rewards_on_last_iteration = [mint_reward, mint_reward]
         last_iteration = False
         moneybox_gran = 100
@@ -145,23 +275,29 @@ class TotalEmissionTest(BitcoinTestFramework):
                 disconnect_nodes(node0, 1)
                 disconnect_nodes(node1, 0)
             for j in range(2):
-                mint_reward_now = min(mint_reward, int(TOTAL_EMISSION_LIMIT - total_amount) // 100 * 100)
+                mint_reward_now = min(mint_reward, (TOTAL_EMISSION_LIMIT - total_amount) // 100 * 100)
                 if not mint_reward_now:
                     last_iteration = True
                     mint_reward_now = 0 if len(mint_rewards_on_last_iteration) == 0 else mint_rewards_on_last_iteration.pop()
                     if not mint_reward_now:
                         break
                 assert(not (last_iteration and use_fork))  # don't use fork on last iteration
-                needed_moneybox_utxos = mint_reward_now // moneybox_gran
+                needed_moneybox_utxos = int(mint_reward_now // moneybox_gran)
                 self.log.debug(f'iter: {i}-{j}, mint_reward_now: {mint_reward_now}, last_iteration: {last_iteration}')
                 now = node0.getblockheader(node0.getbestblockhash())['time']
                 (tx3, _) = compose_mint_tx([self.outpoints.pop()], moneybox_utxos[0:needed_moneybox_utxos],
                                            COutPoint(int(root_cert_hash, 16), 0), COutPoint(int(ca3_cert_hash, 16), 0),
                                            user_key, Decimal(4500), now + ONE_YEAR * 10, Decimal(mint_reward_now) - mint_fee, 0, True)
-                mint_txid = send_tx(node0, self.test_node, tx3, True)
-                self.log.debug(f'sent mint_tx: {mint_txid}')
+                self.log.debug(f'mint tx: {print_tx_ex(tx3, inputs_cnt=2)}')
                 del moneybox_utxos[0:needed_moneybox_utxos]
-                next_block_hash = node0.generate(1)[0]
+                gen_by_node = i or j
+                if gen_by_node:
+                    mint_txid = send_tx(node0, self.test_node, tx3, True)
+                    self.log.debug(f'sent mint_tx: {mint_txid}')
+                    next_block_hash = node0.generate(1)[0]
+                else:
+                    self.run_scenario('block with mint transaction', [tx3], mint_reward_now, verbose=False)
+                    next_block_hash = node0.getbestblockhash()
                 if not last_iteration:
                     moneybox_utxos_this_iter.extend(self.parse_moneybox_utxos(next_block_hash))
                     assert_equal(len(moneybox_utxos) + len(moneybox_utxos_this_iter), 1000)
@@ -169,21 +305,12 @@ class TotalEmissionTest(BitcoinTestFramework):
                 else:
                     # TODO: compose block with mb refill and confirm rejected
                     more = self.parse_moneybox_utxos(next_block_hash, True)
-                    if len(mint_rewards_on_last_iteration) > 0:
-                        assert_equal(len(more), 1)
-                        last_moneybox_amount = self.moneybox_utxo_amounts[more[0]]
-                        assert_greater_than(100, last_moneybox_amount)
-                        moneybox_utxos.extend(more)
-                        total_moneybox_this_iter += last_moneybox_amount
-                        self.log.debug(f'iter: {i}-{j}, last_moneybox_amount: {last_moneybox_amount}')
-                    else:
-                        assert_equal(len(more), 0)
+                    assert_equal(len(more), 0)
                 fee_sum_this_iter += mint_fee
-                total_mined_this_iter += CB_AMOUNT_AFTER_BLOCK_100
-                txoutsetinfo = node0.gettxoutsetinfo()
-                total_amount = txoutsetinfo['total_amount']
-                self.log.debug(f'iter: {i}-{j}, height: {node0.getblockcount()}, total_mined_this_iter: {total_mined_this_iter}, total_mined: {total_mined}, total_moneybox_this_iter: {total_moneybox_this_iter}, total_moneybox: {total_moneybox}, fee_sum_this_iter: {fee_sum_this_iter}, fee_sum: {fee_sum}, txoutsetinfo: {txoutsetinfo}')
-                assert_equal(total_amount, total_mined + total_mined_this_iter + total_moneybox + total_moneybox_this_iter - fee_sum - fee_sum_this_iter)
+                total_amount = ToCoins(extract_total_amount_from_cb_tx(node0.getblock(next_block_hash, 2)['tx'][0]))
+                expected = total_mined + total_mined_this_iter + total_moneybox + total_moneybox_this_iter
+                self.log.debug(f'iter: {i}-{j}, height: {node0.getblockcount()}, total_amount: {total_amount}, expected: {expected}, total_mined_this_iter: {total_mined_this_iter}, total_mined: {total_mined}, total_moneybox_this_iter: {total_moneybox_this_iter}, total_moneybox: {total_moneybox}, fee_sum_this_iter: {fee_sum_this_iter}, fee_sum: {fee_sum}')
+                assert_equal(total_amount, expected)
                 if not last_iteration:
                     assert_greater_than_or_equal(TOTAL_EMISSION_LIMIT, total_amount)
             if not mint_reward_now:
@@ -197,11 +324,10 @@ class TotalEmissionTest(BitcoinTestFramework):
                 node1.generate(3)
                 connect_nodes(node0, 1)
                 sync_blocks(self.nodes)
-                txoutsetinfo = node0.gettxoutsetinfo()
-                total_amount = txoutsetinfo['total_amount']
+                total_amount = ToCoins(extract_total_amount_from_cb_tx(node0.getblock(node0.getbestblockhash(), 2)['tx'][0]))
                 # verify total amount after fork, don't count
                 # total_mined_this_iter and total_moneybox_this_iter - old chain is no more actual
-                assert_equal(total_amount, total_mined + CB_AMOUNT_AFTER_BLOCK_100 * 3 + total_moneybox - fee_sum)
+                assert_equal(total_amount, total_mined + total_moneybox)
                 next_block_hash = node0.generate(1)[0]
                 moneybox_utxos.extend(self.parse_moneybox_utxos(next_block_hash))
                 blocks_to_gen -= 2
@@ -213,12 +339,10 @@ class TotalEmissionTest(BitcoinTestFramework):
             total_mined += total_mined_this_iter
             total_moneybox += total_moneybox_this_iter
             node0.generate(blocks_to_gen)
-            total_mined += CB_AMOUNT_AFTER_BLOCK_100 * 101
 
         # Here we reached TOTAL_EMISSION_LIMIT, but have a little coins in moneybox (less than 100 coins)
         assert_greater_than_or_equal(TOTAL_EMISSION_LIMIT, total_amount - 2 * CB_AMOUNT_AFTER_BLOCK_100)
         assert_greater_than(total_amount, TOTAL_EMISSION_LIMIT - ToCoins('0.1'))
-
 
 
 if __name__ == '__main__':

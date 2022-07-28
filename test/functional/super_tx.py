@@ -85,7 +85,7 @@ class SuperTxTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.setup_clean_chain = False
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=1000']] * 2
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1']] * 2
         self.outpoints = []
         self.taxfree_cert_filename = None
 
@@ -265,24 +265,6 @@ class SuperTxTest(BitcoinTestFramework):
         return (txid, fee + burn_got_sum)
 
 
-    def restart_node_0(self, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None, accepted=True):
-        node0 = self.nodes[0]
-        node1 = self.nodes[1]
-        self.sync_all()
-        if use_cert:
-            write_taxfree_cert_to_file(self.taxfree_cert_filename, super_key_pubkey, root_cert_hash, pass_cert_hash)
-        self.stop_node(0)
-        more_args = [f'-taxfreecert={self.taxfree_cert_filename}'] if use_cert else []
-        self.start_node(0, extra_args=self.extra_args[0] + more_args)
-        connect_nodes(self.nodes[0], 1)
-        if use_cert and accepted:
-            assert_equal(node0.getwalletinfo()['taxfree_certificate'], self.taxfree_cert_filename)
-        elif not use_cert:
-            assert_not_in('taxfree_certificate', node0.getwalletinfo())
-        node1.generate(1)
-        self.sync_all()
-
-
     def run_scenario(self, name, root_cert_key=None, root_cert_flags=None, root_cert_hash=None,
                      root_cert_sig_hash=None, root_cert_sig_key=None, root_cert_signature=None, root_cert_revoked=False,
                      pass_cert_key=None, pass_cert_flags=None, pass_cert_hash=None,
@@ -328,7 +310,7 @@ class SuperTxTest(BitcoinTestFramework):
                                COutPoint(int(pass_cert_hash, 16), 0), super_key, {dest_pkh: amount - fee})
         send_tx(node1, self.test_node, tx3, accepted, reject_reason_p2p)
 
-        self.restart_node_0(True, super_key.get_pubkey(), root_cert_hash, pass_cert_hash, accepted)
+        restart_node_with_cert(self, True, super_key.get_pubkey(), root_cert_hash, pass_cert_hash, accepted)
 
         # createrawtransaction --> signrawtransaction(super_key) --> sendrawtransaction
         # with and without mining transactions into blocks
@@ -393,7 +375,7 @@ class SuperTxTest(BitcoinTestFramework):
         for txid in txids:
             assert_greater_than(node0.getrawtransaction(txid, 1)['confirmations'], 0)
         assert_equal(balance_before, balance_after + spent_sum)
-        self.restart_node_0(False)
+        restart_node_with_cert(self, False)
         self.test_node.sync_with_ping()
         self.log.debug(f'Finish scenario {name}')
 

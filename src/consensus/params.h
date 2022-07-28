@@ -88,8 +88,8 @@ struct Params {
     /** total money supply */
     CAmount     maxTotalAmount;
 
-    /** after this block, mining without certificates is prohibited */
-    uint32_t    holyMiningBlock;
+    /** new total rules after this block */
+    uint32_t    startTotalNgBlock;
 };
 
 } // namespace Consensus

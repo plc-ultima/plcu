@@ -193,7 +193,6 @@ Q_SIGNALS:
     void runawayException(const QString &message);
 
 private:
-    boost::thread_group threadGroup;
     CScheduler scheduler;
 
     /// Pass fatal exception message to UI thread
@@ -295,12 +294,14 @@ bool BitcoinCore::baseInitialize()
     return true;
 }
 
+boost::thread_group g_threadGroup;
+
 void BitcoinCore::initialize()
 {
     try
     {
         qDebug() << __func__ << ": Running initialization in thread";
-        bool rv = AppInitMain(threadGroup, scheduler);
+        bool rv = AppInitMain(g_threadGroup, scheduler);
         Q_EMIT initializeResult(rv);
     } catch (const std::exception& e) {
         handleRunawayException(&e);
@@ -314,8 +315,8 @@ void BitcoinCore::shutdown()
     try
     {
         qDebug() << __func__ << ": Running Shutdown in thread";
-        Interrupt(threadGroup);
-        threadGroup.join_all();
+        Interrupt(g_threadGroup);
+        g_threadGroup.join_all();
         Shutdown();
         qDebug() << __func__ << ": Shutdown finished";
         Q_EMIT shutdownResult();
@@ -410,7 +411,7 @@ void BitcoinApplication::startThread()
     if(coreThread)
         return;
     coreThread = new QThread(this);
-    BitcoinCore *executor = new BitcoinCore();
+    BitcoinCore * executor = new BitcoinCore();
     executor->moveToThread(coreThread);
 
     /*  communication to and from thread */

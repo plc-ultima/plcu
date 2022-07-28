@@ -374,8 +374,14 @@ bool Validator::validateChainOfCerts(const std::vector<Certificate>             
                                      const std::vector<std::vector<unsigned char> > & pubkeys,
                                      CertParameters                                 & params) const
 {
-    assert(certs.size() == 2 && "wrong size, need review");
-    CertParameters paramsInternal[2];
+    if (certs.size() < 2)
+    {
+        // 2 - minimum
+        LogPrintf("%s: Wrong count of certs\n", __func__);
+        return false;
+    }
+
+    CertParameters paramsInternal[certs.size()];
 
     std::vector<std::vector<unsigned char> > pubkeysOrHashUp = pubkeys;
 
@@ -462,11 +468,13 @@ bool Validator::validateChainOfCerts(const std::vector<Certificate>             
     params.flags              |= (paramsInternal[certs.size()-1].flags & (silverHoof));
     params.flags              |= (paramsInternal[certs.size()-1].flags & (shadowEmperor));
     params.flags              |= (paramsInternal[certs.size()-1].flags & (holyShovel));
+    params.flags              |= (paramsInternal[certs.size()-1].flags & (masterOfTime));
 
     if (params.deviceKeyHash.IsNull() &&
             (params.flags & silverHoof) == 0 &&
             (params.flags & shadowEmperor) == 0 &&
-            (params.flags & holyShovel) == 0)
+            (params.flags & holyShovel) == 0 &&
+            (params.flags & masterOfTime) == 0)
     {
         LogPrintf("%s: No device h(key) found\n", __func__);
         return false;

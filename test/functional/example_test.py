@@ -25,12 +25,7 @@ from test_framework.mininode import (
     msg_getdata,
 )
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (
-    assert_equal,
-    connect_nodes,
-    p2p_port,
-    wait_until,
-)
+from test_framework.util import *
 
 # NodeConnCB is a class containing callbacks to be executed when a P2P
 # message is received from the node-under-test. Subclass NodeConnCB and
@@ -191,6 +186,7 @@ class ExampleTest(BitcoinTestFramework):
 
         self.log.info("Connect node2 and node1")
         connect_nodes(self.nodes[1], 2)
+        sync_blocks(self.nodes)
 
         self.log.info("Add P2P connection to node2")
         node2 = BaseNode()

@@ -206,12 +206,37 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
                 }
                 else if (opcode2 == OP_SMALLINTEGER)
                 {
+                    bool is_lockTime = false;
+                    // check next opcode, may be locktimeverify?
+                    CScript::const_iterator pc2t = pc2;
+                    opcodetype opcode2t;
+                    std::vector<unsigned char> vch2t;
+                    if (script2.GetOp(pc2t, opcode2t, vch2t))
+                    {
+                        if (opcode2t == OP_CHECKLOCKTIMEVERIFY)
+                        {
+                            is_lockTime = true;
+                        }
+                    }
+
+
                     // Single-byte small integer pushed onto vSolutions
                     if (opcode1 == OP_0 ||
                         (opcode1 >= OP_1 && opcode1 <= OP_16))
                     {
                         char n = (char)CScript::DecodeOP_N(opcode1);
-                        vSolutionsRet.push_back(valtype(1, n));
+
+                        if (is_lockTime)
+                        {
+                            if (lockTimeRet < static_cast<uint32_t>(n))
+                            {
+                                lockTimeRet = static_cast<uint32_t>(n);
+                            }
+                        }
+                        else
+                        {
+                            vSolutionsRet.push_back(valtype(1, n));
+                        }
                     }
                     else if (opcode1 <= OP_PUSHDATA1)
                     {
@@ -220,24 +245,19 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
                             break;
                         }
 
-                        // need to push ?
-                        // vSolutionsRet.push_back(vch1);
-
-                        // check next opcode, may be locktimeverify?
-                        CScript::const_iterator pc2t = pc2;
-                        opcodetype opcode2t;
-                        std::vector<unsigned char> vch2t;
-                        if (script2.GetOp(pc2t, opcode2t, vch2t))
+                        if (is_lockTime)
                         {
-                            if (opcode2t == OP_CHECKLOCKTIMEVERIFY)
+                            const CScriptNum locktime(vch1, true, 5);
+                            // uint32_t locktime = (uint32_t)CScript::DecodeOP_N(opcode1);
+                            if (lockTimeRet < locktime.get<uint32_t>())
                             {
-                                const CScriptNum locktime(vch1, true, 5);
-                                // uint32_t locktime = (uint32_t)CScript::DecodeOP_N(opcode1);
-                                if (lockTimeRet < locktime.get<uint32_t>())
-                                {
-                                    lockTimeRet = locktime.get<uint32_t>();
-                                }
+                                lockTimeRet = locktime.get<uint32_t>();
                             }
+                        }
+                        else
+                        {
+                            // need to push ?
+                            // vSolutionsRet.push_back(vch1);
                         }
                     }
                     else

@@ -60,15 +60,7 @@ bool TransactionSignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, 
 //******************************************************************************
 bool TransactionSignatureCreator::CreateSuperSig(std::vector<CScript> & scripts, SigVersion sigversion) const
 {
-    if (txTo->vin.at(nIn).prevout.n == static_cast<uint32_t>(-1))
-    {
-        if (!keystore->hasMinerCert())
-        {
-            LogPrintStr("No miner cert\n");
-            return false;
-        }
-    }
-    else if (txTo->vin.at(nIn).prevout.n == 0)
+    if (txTo->vin.at(nIn).prevout.isMarker(supertransaction))
     {
         if (!keystore->hasTaxFreeCert())
         {

@@ -441,6 +441,73 @@ UniValue getrawmempool(const JSONRPCRequest& request)
     return mempoolToJSON(fVerbose);
 }
 
+uint256 sendTransaction(const std::string & strtx, const CAmount & nMaxRawTxFee, const bool isDryrun);
+
+UniValue resendmempooltransactions(const JSONRPCRequest& request)
+{
+    bool allowed = gArgs.GetBoolArg("-allowresendmempooltx", false);
+    if (!allowed)
+    {
+        throw std::runtime_error("not allowed");
+    }
+
+    if (request.fHelp || request.params.size() > 0)
+    {
+        throw std::runtime_error(
+            "resendmempooltransactions\n"
+            "\nResend mempool transactions, returns array of transaction ids.\n"
+            + HelpExampleCli("resendmempooltransactions", "")
+            + HelpExampleRpc("resendmempooltransactions", "")
+        );
+    }
+
+    std::vector<CTransaction> txs;
+    {
+        LOCK(mempool.cs);
+
+        // mapTx = mempool.mapTx;
+        for (const CTxMemPoolEntry & e : mempool.mapTx)
+        {
+            const CTransaction & tx = e.GetTx();
+
+            // check time (1 hour)
+            if (GetTime() - e.GetTime() < 60*60)
+            {
+                // skip
+                continue;
+            }
+
+            // check inputs
+            bool needToSkip = false;
+            for (const CTxIn & txin : tx.vin)
+            {
+                if (mempool.exists(txin.prevout.hash))
+                {
+                    needToSkip = true;
+                    break;
+                }
+            }
+
+            if (needToSkip)
+            {
+                continue;
+            }
+
+            txs.emplace_back(tx);
+        }
+    }
+
+    UniValue o(UniValue::VARR);
+
+    for (const CTransaction & tx : txs)
+    {
+        sendTransaction(EncodeHexTx(tx), maxTxFee, false);
+        o.push_back(tx.GetHash().ToString());
+    }
+
+    return o;
+}
+
 UniValue getmempoolancestors(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
@@ -1549,35 +1616,36 @@ UniValue getchaintxstats(const JSONRPCRequest& request)
 }
 
 static const CRPCCommand commands[] =
-{ //  category              name                      actor (function)         okSafe argNames
-  //  --------------------- ------------------------  -----------------------  ------ ----------
-    { "blockchain",         "getblockchaininfo",      &getblockchaininfo,      true,  {} },
-    { "blockchain",         "getchaintxstats",        &getchaintxstats,        true,  {"nblocks", "blockhash"} },
-    { "blockchain",         "getbestblockhash",       &getbestblockhash,       true,  {} },
-    { "blockchain",         "getblockcount",          &getblockcount,          true,  {} },
-    { "blockchain",         "getblock",               &getblock,               true,  {"blockhash","verbosity|verbose"} },
-    { "blockchain",         "getblockhash",           &getblockhash,           true,  {"height"} },
-    { "blockchain",         "getblockheader",         &getblockheader,         true,  {"blockhash","verbose"} },
-    { "blockchain",         "getchaintips",           &getchaintips,           true,  {} },
-    { "blockchain",         "getdifficulty",          &getdifficulty,          true,  {} },
-    { "blockchain",         "getmempoolancestors",    &getmempoolancestors,    true,  {"txid","verbose"} },
-    { "blockchain",         "getmempooldescendants",  &getmempooldescendants,  true,  {"txid","verbose"} },
-    { "blockchain",         "getmempoolentry",        &getmempoolentry,        true,  {"txid"} },
-    { "blockchain",         "getmempoolinfo",         &getmempoolinfo,         true,  {} },
-    { "blockchain",         "getrawmempool",          &getrawmempool,          true,  {"verbose"} },
-    { "blockchain",         "gettxout",               &gettxout,               true,  {"txid","n","include_mempool"} },
-    { "blockchain",         "gettxoutsetinfo",        &gettxoutsetinfo,        true,  {} },
-    { "blockchain",         "pruneblockchain",        &pruneblockchain,        true,  {"height"} },
-    { "blockchain",         "verifychain",            &verifychain,            true,  {"checklevel","nblocks"} },
+{ //  category              name                         actor (function)            okSafe argNames
+  //  --------------------- ---------------------------  --------------------------  ------ ----------
+    { "blockchain",         "getblockchaininfo",         &getblockchaininfo,         true,  {} },
+    { "blockchain",         "getchaintxstats",           &getchaintxstats,           true,  {"nblocks", "blockhash"} },
+    { "blockchain",         "getbestblockhash",          &getbestblockhash,          true,  {} },
+    { "blockchain",         "getblockcount",             &getblockcount,             true,  {} },
+    { "blockchain",         "getblock",                  &getblock,                  true,  {"blockhash","verbosity|verbose"} },
+    { "blockchain",         "getblockhash",              &getblockhash,              true,  {"height"} },
+    { "blockchain",         "getblockheader",            &getblockheader,            true,  {"blockhash","verbose"} },
+    { "blockchain",         "getchaintips",              &getchaintips,              true,  {} },
+    { "blockchain",         "getdifficulty",             &getdifficulty,             true,  {} },
+    { "blockchain",         "getmempoolancestors",       &getmempoolancestors,       true,  {"txid","verbose"} },
+    { "blockchain",         "getmempooldescendants",     &getmempooldescendants,     true,  {"txid","verbose"} },
+    { "blockchain",         "getmempoolentry",           &getmempoolentry,           true,  {"txid"} },
+    { "blockchain",         "getmempoolinfo",            &getmempoolinfo,            true,  {} },
+    { "blockchain",         "getrawmempool",             &getrawmempool,             true,  {"verbose"} },
+    { "blockchain",         "resendmempooltransactions", &resendmempooltransactions, true,  {} },
+    { "blockchain",         "gettxout",                  &gettxout,                  true,  {"txid","n","include_mempool"} },
+    { "blockchain",         "gettxoutsetinfo",           &gettxoutsetinfo,           true,  {} },
+    { "blockchain",         "pruneblockchain",           &pruneblockchain,           true,  {"height"} },
+    { "blockchain",         "verifychain",               &verifychain,               true,  {"checklevel","nblocks"} },
 
-    { "blockchain",         "preciousblock",          &preciousblock,          true,  {"blockhash"} },
+    { "blockchain",         "preciousblock",             &preciousblock,             true,  {"blockhash"} },
 
     /* Not shown in help */
-    { "hidden",             "invalidateblock",        &invalidateblock,        true,  {"blockhash"} },
-    { "hidden",             "reconsiderblock",        &reconsiderblock,        true,  {"blockhash"} },
-    { "hidden",             "waitfornewblock",        &waitfornewblock,        true,  {"timeout"} },
-    { "hidden",             "waitforblock",           &waitforblock,           true,  {"blockhash","timeout"} },
-    { "hidden",             "waitforblockheight",     &waitforblockheight,     true,  {"height","timeout"} },
+    { "hidden",             "invalidateblock",           &invalidateblock,           true,  {"blockhash"} },
+    { "hidden",             "reconsiderblock",           &reconsiderblock,           true,  {"blockhash"} },
+    { "hidden",             "waitfornewblock",           &waitfornewblock,           true,  {"timeout"} },
+    { "hidden",             "waitforblock",              &waitforblock,              true,  {"blockhash","timeout"} },
+    { "hidden",             "waitforblockheight",        &waitforblockheight,        true,  {"height","timeout"} },
 };
 
 void RegisterBlockchainRPCCommands(CRPCTable &t)

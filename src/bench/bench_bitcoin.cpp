@@ -10,6 +10,10 @@
 #include "util.h"
 #include "random.h"
 
+#include <boost/thread.hpp>
+
+boost::thread_group g_threadGroup;
+
 int
 main(int argc, char** argv)
 {

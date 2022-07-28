@@ -1222,9 +1222,9 @@ class MintingTest(BitcoinTestFramework):
         active = (params['refill_moneybox'] == 'script')
         invalid_refill_moneybox = params['invalid_refill_moneybox'] if 'invalid_refill_moneybox' in params else None
         refill_moneybox_dest_list = split_names(params['refill_moneybox_dest']) if 'refill_moneybox_dest' in params else None
-        self.log.debug('will refill_moneybox, amount: {}, active: {}, refill_moneybox_accepted: {}'.format(amount, active, self.refill_moneybox_accepted))
+        self.log.debug(f'will refill_moneybox, amount: {amount}, active: {active}, refill_moneybox_accepted: {self.refill_moneybox_accepted}')
         if invalid_refill_moneybox is not None:
-            self.log.debug('invalid_refill_moneybox: {}'.format(invalid_refill_moneybox))
+            self.log.debug(f'invalid_refill_moneybox: {invalid_refill_moneybox}')
         if refill_moneybox_dest_list is not None:
             assert_equal(len(refill_moneybox_dest_list), 1) # only one destination is supported
             self.log.debug('refill_moneybox_dest_list ({}): {}'.format(len(refill_moneybox_dest_list), refill_moneybox_dest_list))
@@ -1235,8 +1235,8 @@ class MintingTest(BitcoinTestFramework):
             if parent_hash is None:
                 parent_hash = node0.getbestblockhash()
             if parent_block is None:
-                parent_block = node0.getblock(parent_hash)
-            self.log.debug('parent_block: {}'.format(parent_block))
+                parent_block = node0.getblock(parent_hash, 2)
+            self.log.debug(f'parent_block: {parent_block}')
             assert_equal(parent_hash, parent_block['hash'])
             block = CBlock()
             block.nVersion = parent_block['version']
@@ -1244,22 +1244,25 @@ class MintingTest(BitcoinTestFramework):
             block.nTime = parent_block['time'] + 1
             block.nBits = int(parent_block['bits'], 16)
             height = parent_block['height'] + 1
+            amount_sat = ToSatoshi(amount)
             if invalid_refill_moneybox is None and refill_moneybox_dest_list is None:
                 # regular workflow:
-                coinbase = create_coinbase(height, None, 0, ToSatoshi(amount))
+                coinbase = create_coinbase(height, None, 0, amount_sat)
             elif invalid_refill_moneybox == 1:
                 coinbase = create_coinbase(height, None, 0, 0)
             elif invalid_refill_moneybox == 2:
-                coinbase = create_coinbase(height, None, 0, ToSatoshi(amount) - 1)
+                coinbase = create_coinbase(height, None, 0, amount_sat - 1)
             elif invalid_refill_moneybox == 3:
-                coinbase = create_coinbase(height, None, 0, ToSatoshi(amount) + 1)
+                coinbase = create_coinbase(height, None, 0, amount_sat + 1)
             elif invalid_refill_moneybox == 4:
-                coinbase = create_coinbase(height, None, 0, ToSatoshi(amount), granularity = get_moneybox_granularity(height) // 2)
+                coinbase = create_coinbase(height, None, 0, amount_sat,
+                                           granularity=get_moneybox_granularity(height) // 2)
             elif invalid_refill_moneybox == 5:
-                coinbase = create_coinbase(height, None, 0, ToSatoshi(amount), granularity = get_moneybox_granularity(height) * 2)
+                coinbase = create_coinbase(height, None, 0, amount_sat,
+                                           granularity=get_moneybox_granularity(height) * 2)
             elif len(refill_moneybox_dest_list) == 1:
-                coinbase = create_coinbase(height, None, 0, ToSatoshi(amount),
-                                           moneyboxscript = self.get_dest_scriptpubkey(refill_moneybox_dest_list[0], params))
+                coinbase = create_coinbase(height, None, 0, amount_sat,
+                                           moneyboxscript=self.get_dest_scriptpubkey(refill_moneybox_dest_list[0], params))
             else:
                 assert (0)
             block.vtx.append(coinbase)
@@ -1268,9 +1271,9 @@ class MintingTest(BitcoinTestFramework):
                 if txid not in skip_transactions:
                     tx = FromHex(CTransaction(), node0.getrawtransaction(txid))
                     block.vtx.append(tx)
-                    self.log.debug('tx from mempool {}: added to block'.format(txid))
+                    self.log.debug(f'tx from mempool {txid}: added to block')
                 else:
-                    self.log.debug('tx from mempool {}: skipped'.format(txid))
+                    self.log.debug(f'tx from mempool {txid}: skipped')
             block.hashMerkleRoot = block.calc_merkle_root()
             block.nNonce = random.randint(0,0xffff)
             block.solve()

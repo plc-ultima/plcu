@@ -419,7 +419,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
             "  \"coinbaseaux\" : {                 (json object) data that should be included in the coinbase's scriptSig content\n"
             "      \"flags\" : \"xx\"                  (string) key name is to be ignored, and value included in scriptSig\n"
             "  },\n"
-            "  \"coinbasevalue\" : n,              (numeric) maximum allowable input to coinbase transaction, including the generation award and transaction fees (in Satoshis)\n"
+            "  \"coinbasevalue\" : [ n, ... ]      (numeric) maximum allowable input to coinbase transaction, including the generation award and transaction fees (in Satoshis)\n"
             "  \"coinbasetxn\" : { ... },          (json object) information for coinbase transaction\n"
             "  \"target\" : \"xxxx\",                (string) The hash target\n"
             "  \"mintime\" : xxx,                  (numeric) The minimum timestamp appropriate for next block time in seconds since epoch (Jan 1 1970 GMT)\n"
@@ -593,11 +593,8 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
         fLastTemplateSupportsSegwit = fSupportsSegwit;
 
         // Create new block
-        // static CScript scriptDummy = GetScriptForDestination(CScript() << OP_TRUE);
-        std::shared_ptr<CReserveScript> coinbase_script;
-        pwallet->GetScriptForMining(coinbase_script);
-
-        pblocktemplate = BlockAssembler(*pwallet, Params()).CreateNewBlock(coinbase_script->subsidyDestination, fSupportsSegwit);
+        static CScript scriptDummy = GetScriptForDestination(CScript() << OP_TRUE);
+        pblocktemplate = BlockAssembler(*pwallet, Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
 
@@ -607,6 +604,12 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     CBlock* pblock = &pblocktemplate->block; // pointer for convenience
     const Consensus::Params& consensusParams = Params().GetConsensus();
 
+    // update extra nonce
+    {
+        static uint32_t extraNonce = 0;
+        IncrementExtraNonce(pblock, chainActive.Tip(), extraNonce);
+    }
+
     // Update nTime
     UpdateTime(pblock, consensusParams, pindexPrev);
     pblock->nNonce = 0;
@@ -614,7 +617,9 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     // NOTE: If at some point we support pre-segwit miners post-segwit-activation, this needs to take segwit support into consideration
     const bool fPreSegWit = (THRESHOLD_ACTIVE != VersionBitsState(pindexPrev, consensusParams, Consensus::DEPLOYMENT_SEGWIT, versionbitscache));
 
-    UniValue aCaps(UniValue::VARR); aCaps.push_back("proposal");
+    UniValue aCaps(UniValue::VARR);
+    aCaps.push_back("proposal");
+    aCaps.push_back("coinbaseextrains");
 
     UniValue transactions(UniValue::VARR);
     std::map<uint256, int64_t> setTxIndex;
@@ -746,9 +751,24 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
     // coinbasetxn
     {
-        UniValue data(UniValue::VOBJ);
-        data.push_back(Pair("data", EncodeHexTx(*pblock->vtx[0].get(), RPCSerializationFlags())));
-        result.push_back(Pair("coinbasetxn", data));
+    }
+
+    // coinbaseextrains
+    {
+        UniValue extra(UniValue::VARR);
+
+        CTransactionRef cb = pblock->vtx[0];
+        for (const CTxIn & in : cb->vin)
+        {
+            if (in.prevout.n == TxInMarkerType::totalAmount)
+            {
+                CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION);
+                ssTx << in;
+                extra.push_back(HexStr(ssTx.begin(), ssTx.end()));
+            }
+        }
+
+        result.push_back(Pair("coinbaseextrains", extra));
     }
 
     result.push_back(Pair("longpollid", chainActive.Tip()->GetBlockHash().GetHex() + i64tostr(nTransactionsUpdatedLast)));

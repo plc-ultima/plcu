@@ -954,6 +954,9 @@ def SegwitVersion1SignatureHash(script, txTo, inIdx, hashtype, amount):
 
 
 # Helper for getting the script associated with a P2PKH
+def GetP2PKScript(pubkey):
+    return CScript([pubkey, OP_CHECKSIG])
+
 def GetP2PKHScript(pubkeyhash):
     return CScript([OP_DUP, OP_HASH160, pubkeyhash, OP_EQUALVERIFY, OP_CHECKSIG])
 
@@ -1043,4 +1046,5 @@ def Base58ToSecretBytes(key_base58, testnet = True):
 
 def print_key_verbose(key, name):
     pubkey = key.get_pubkey()
-    logger.debug(f'key: {name}, private: {bytes_to_hex_str(key.get_secret())} / {SecretBytesToBase58(key.get_secret())}, public: {bytes_to_hex_str(pubkey)}, pkh: {bytes_to_hex_str(hash160(pubkey))}, address: {AddressFromPubkey(pubkey)}')
+    pkh = hash160(pubkey)
+    logger.debug(f'key: {name}, private: {bytes_to_hex_str(key.get_secret())} / {SecretBytesToBase58(key.get_secret())}, public: {bytes_to_hex_str(pubkey)}, pkh: {bytes_to_hex_str(pkh)} / {bytes_to_hex_str(reverse(pkh))}, address: {AddressFromPubkeyHash(pkh)}')

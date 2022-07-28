@@ -7,8 +7,11 @@
 #include "net.h"
 
 #include <boost/test/unit_test.hpp>
+#include <boost/thread.hpp>
 
 std::unique_ptr<CConnman> g_connman;
+
+boost::thread_group g_threadGroup;
 
 void Shutdown(void* parg)
 {

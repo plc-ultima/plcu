@@ -24,6 +24,8 @@
 
 #include <stdio.h>
 
+boost::thread_group g_threadGroup;
+
 /* Introduction text for doxygen: */
 
 /*! \mainpage Developer documentation
@@ -62,7 +64,6 @@ void WaitForShutdown(boost::thread_group* threadGroup)
 //
 bool AppInit(int argc, char* argv[])
 {
-    boost::thread_group threadGroup;
     CScheduler scheduler;
 
     bool fRet = false;
@@ -165,7 +166,7 @@ bool AppInit(int argc, char* argv[])
             // If locking the data directory failed, exit immediately
             exit(EXIT_FAILURE);
         }
-        fRet = AppInitMain(threadGroup, scheduler);
+        fRet = AppInitMain(g_threadGroup, scheduler);
     }
     catch (const std::exception& e) {
         PrintExceptionContinue(&e, "AppInit()");
@@ -175,10 +176,10 @@ bool AppInit(int argc, char* argv[])
 
     if (!fRet)
     {
-        Interrupt(threadGroup);
-        threadGroup.join_all();
+        Interrupt(g_threadGroup);
+        g_threadGroup.join_all();
     } else {
-        WaitForShutdown(&threadGroup);
+        WaitForShutdown(&g_threadGroup);
     }
     Shutdown();
 

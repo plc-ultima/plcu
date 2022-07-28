@@ -48,7 +48,7 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-holyminingblock-regtest=2500']]
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-totalforkblock-regtest=2500']]
         self.outpoints = []
 
 
