@@ -111,6 +111,8 @@ const char* ScriptErrorString(const ScriptError serror)
             return "Bad reward, too many moneybox inputs";
         case SCRIPT_ERR_BAD_REWARD_NO_USER_VINS:
             return "Bad reward, no user inputs";
+        case SCRIPT_ERR_BAD_REWARD_NO_USER_VOUTS:
+            return "Bad reward, no user outputs found";
         case SCRIPT_ERR_BAD_REWARD_MANY_MONEYBOX_OUTS:
             return "Bad reward, too many moneybox outputs";
         case SCRIPT_ERR_BAD_REWARD_MANY_USER_OUTS:
@@ -123,6 +125,8 @@ const char* ScriptErrorString(const ScriptError serror)
             return "Bad reward, less than transaction fee";
         case SCRIPT_ERR_BAD_REWARD_BIG_BEN:
             return "Bad reward, BIG BEN";
+        case SCRIPT_ERR_BAD_REWARD_SMALL_BEN:
+            return "Bad reward, SMALL BEN";
         case SCRIPT_ERR_BAD_REWARD_NOSIG:
             return "Bad reward, no signatures";
         case SCRIPT_ERR_BAD_REWARD_WRONG_SIG:

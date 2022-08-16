@@ -460,6 +460,18 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
         }
     }
 
+#ifdef ENABLE_WALLET
+    if (gArgs.GetBoolArg("-smart-createrawtransaction", false))
+    {
+        CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+        if (pwallet->hasTaxFreeCert())
+        {
+            rawTx.vin.emplace_back(uint256(), supertransaction);
+        }
+    }
+
+#endif
+
     if (!request.params[3].isNull() && rbfOptIn != SignalsOptInRBF(rawTx)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter combination: Sequence number(s) contradict replaceable option");
     }

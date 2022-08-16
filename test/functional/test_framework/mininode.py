@@ -1894,6 +1894,15 @@ def extract_total_amount_from_cb_tx(tx):
     return total_amount
 
 
+def extract_total_amount_from_input(input_hex):
+    input = FromHex(CTxIn(), input_hex)
+    assert_equal(input.prevout.n, TXIN_MARKER_TOTAL_AMOUNT)
+    data_len = int(input.scriptSig[0])
+    data = input.scriptSig[1:]
+    assert_equal(data_len, len(data))
+    value = read_uint_from_buffer(data)
+    return value
+
 def set_total_amount_to_cb_tx(tx, total_amount):
     found = False
     if total_amount is not None:

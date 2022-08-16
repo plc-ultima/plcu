@@ -105,6 +105,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "compressmineoutputs", 1, "amount"},
     { "compressmineoutputs", 2, "send"},
     { "compressmineoutputs", 3, "count"},
+    { "compressmineoutputs", 4, "verbose"},
     { "compressoutputs", 1, "amount"},
     { "compressoutputs", 2, "send"},
     { "compressoutputs", 3, "count"},

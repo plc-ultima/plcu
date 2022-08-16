@@ -74,68 +74,58 @@ class TotalEmissionTest(BitcoinTestFramework):
         for tx in tx_list:
             tx.rehash()
         tmpl = self.nodes[0].getblocktemplate()
-        coinbasetxn_hex = tmpl['coinbasetxn']['data']
-        coinbasetxn_orig = FromHex(CTransaction(), coinbasetxn_hex)
-        coinbasetxn_orig.vout = [ou for ou in coinbasetxn_orig.vout if ou.scriptPubKey[0] != OP_RETURN]
-        total_amount_orig = extract_total_amount_from_cb_tx(coinbasetxn_orig)
+        coinbase_input_hex = tmpl['coinbaseextrains'][0]
+        total_amount_orig = extract_total_amount_from_input(coinbase_input_hex)
         total_amount_correct = total_amount_orig + total_delta
         previousblockhash = int(tmpl['previousblockhash'], 16)
         curtime = tmpl['curtime']
         height = tmpl['height']
         bits = int(tmpl['bits'], 16)
-
-        if refill_mb:
-            coinbase_dup = create_coinbase(height, None, 0, refill_mb)
-            coinbasetxn_orig.vout.extend(coinbase_dup.vout[1:])
+        coinbasetxn = create_coinbase(height, None, 0, refill_mb, total_bc_amount=-1)  # without total amount yet
 
         if full_check and accepted:
-            coinbasetxn_b = copy.deepcopy(coinbasetxn_orig)
-            coinbasetxn_b.vin = [coinbasetxn_b.vin[0]]
-
             # No total amount coinbase input: rejected
-            coinbasetxn = copy.deepcopy(coinbasetxn_b)
-            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
-                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
-            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            coinbasetxn_cpy = copy.deepcopy(coinbasetxn)
+            coinbasetxn_cpy = add_cert_to_coinbase(coinbasetxn_cpy, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                                   COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn_cpy, curtime, bits, VB_TOP_BITS, tx_list)
             send_block(node, test_node, block, False, 'bad-coinbase-without-total', verbose=verbose)
 
             # Total amount is 1 satoshi more than required: rejected
-            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            coinbasetxn_cpy = copy.deepcopy(coinbasetxn)
             total_amount = total_amount_correct + 1
-            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
-            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
-                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
-            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            set_total_amount_to_cb_tx(coinbasetxn_cpy, total_amount)
+            coinbasetxn_cpy = add_cert_to_coinbase(coinbasetxn_cpy, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                                   COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn_cpy, curtime, bits, VB_TOP_BITS, tx_list)
             send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
 
             # Total amount is 1 satoshi less than required: rejected
-            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            coinbasetxn_cpy = copy.deepcopy(coinbasetxn)
             total_amount = total_amount_correct - 1
-            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
-            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+            set_total_amount_to_cb_tx(coinbasetxn_cpy, total_amount)
+            coinbasetxn_cpy = add_cert_to_coinbase(coinbasetxn_cpy, COutPoint(int(self.root_cert_hash_holy, 16), 0),
                                                COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
-            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            block = create_block(previousblockhash, coinbasetxn_cpy, curtime, bits, VB_TOP_BITS, tx_list)
             send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
 
             # Zero total amount: rejected
-            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            coinbasetxn_cpy = copy.deepcopy(coinbasetxn)
             total_amount = 0
-            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
-            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
-                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
-            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            set_total_amount_to_cb_tx(coinbasetxn_cpy, total_amount)
+            coinbasetxn_cpy = add_cert_to_coinbase(coinbasetxn_cpy, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                                   COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn_cpy, curtime, bits, VB_TOP_BITS, tx_list)
             send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
 
             # Empty total amount: rejected
-            coinbasetxn = copy.deepcopy(coinbasetxn_b)
+            coinbasetxn_cpy = copy.deepcopy(coinbasetxn)
             total_amount = None
-            set_total_amount_to_cb_tx(coinbasetxn, total_amount)
-            coinbasetxn = add_cert_to_coinbase(coinbasetxn, COutPoint(int(self.root_cert_hash_holy, 16), 0),
-                                               COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
-            block = create_block(previousblockhash, coinbasetxn, curtime, bits, VB_TOP_BITS, tx_list)
+            set_total_amount_to_cb_tx(coinbasetxn_cpy, total_amount)
+            coinbasetxn_cpy = add_cert_to_coinbase(coinbasetxn_cpy, COutPoint(int(self.root_cert_hash_holy, 16), 0),
+                                                   COutPoint(int(self.pass_cert_hash_holy, 16), 0), self.super_key_holy)
+            block = create_block(previousblockhash, coinbasetxn_cpy, curtime, bits, VB_TOP_BITS, tx_list)
             send_block(node, test_node, block, False, 'bad-coinbase-wrong-total', verbose=verbose)
-        else:
-            coinbasetxn = coinbasetxn_orig
 
         # Positive scenario at the end: accepted
         total_amount = total_amount_correct

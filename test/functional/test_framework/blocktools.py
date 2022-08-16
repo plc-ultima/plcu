@@ -107,7 +107,8 @@ def create_coinbase(height, pubkey=None, minerfees=0, refill_moneybox_amount=0, 
         total_bc_amount = get_total_expected(height)
     coinbase = CTransaction()
     coinbase.vin.append(CTxIn(COutPoint(0, TXIN_MARKER_COINBASE), ser_string(serialize_script_num(height)), 0xffffffff))
-    coinbase.vin.append(CTxIn(COutPoint(0, TXIN_MARKER_TOTAL_AMOUNT), ser_string(serialize_script_num(ToSatoshi(total_bc_amount))), 0xffffffff))
+    if total_bc_amount != -1:
+        coinbase.vin.append(CTxIn(COutPoint(0, TXIN_MARKER_TOTAL_AMOUNT), ser_string(serialize_script_num(ToSatoshi(total_bc_amount))), 0xffffffff))
     coinbase.vout = []
 
     subsidy = CTxOut()

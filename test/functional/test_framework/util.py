@@ -16,6 +16,7 @@ import re
 from subprocess import CalledProcessError
 import time
 import string
+import struct
 
 from . import coverage
 from .authproxy import AuthServiceProxy, JSONRPCException
@@ -805,3 +806,20 @@ def verify_tx_sent(node, txid):
     assert_in(txid, node.getrawmempool())
     fee = -node.gettransaction(txid)['fee']
     assert_greater_than(fee, 0)
+
+def read_uint_from_buffer(buffer):
+    buf_len = len(buffer)
+    assert_greater_than(buf_len, 0)
+    if buf_len == 1:
+        value = struct.unpack('<B', buffer)[0]
+    elif buf_len == 2:
+        value = struct.unpack('<H', buffer)[0]
+    elif buf_len <= 4:
+        buffer += b'\x00' * (4 - buf_len)
+        value = struct.unpack('<I', buffer)[0]
+    elif buf_len <= 8:
+        buffer += b'\x00' * (8 - buf_len)
+        value = struct.unpack('<Q', buffer)[0]
+    else:
+        assert 0, f'invalid buf_len: {buf_len}'
+    return value

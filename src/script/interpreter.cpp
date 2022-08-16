@@ -2010,6 +2010,42 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
 
     } // outputs
 
+    // more outputs
+    if (isSilverHoof && countOfUserOutputs == 0)
+    {
+        // user outputs not found
+        // find out with max locktime and use it
+        uint32_t maxLockedIdx = std::numeric_limits<uint32_t>::max();
+        for (uint32_t i = 0; i < txTo->vout.size(); ++i)
+        {
+            if (maxLockTime < locks[i])
+            {
+                maxLockedIdx = i;
+                maxLockTime  = locks[i];
+            }
+        }
+
+        if (maxLockedIdx == std::numeric_limits<uint32_t>::max())
+        {
+            LogPrintf("No locked outputs\n");
+            return set_error(serror, SCRIPT_ERR_BAD_REWARD_NO_USER_VOUTS);
+        }
+
+        const CTxOut & vout = txTo->vout[maxLockedIdx];
+        maxLockedAmount = vout.nValue;
+        outputAmount    = vout.nValue;
+        ++countOfUserOutputs;
+        ++countOfUserLockedOutputs;
+
+        if (beneficiaryAmount < vout.nValue)
+        {
+            LogPrintf("Small ben\n");
+            return set_error(serror, SCRIPT_ERR_BAD_REWARD_NO_USER_VOUTS);
+        }
+
+        beneficiaryAmount -= vout.nValue;
+    }
+
     // user locked only if silver hoof is set
     if (!isSilverHoof)
     {

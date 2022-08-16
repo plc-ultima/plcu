@@ -890,7 +890,7 @@ UniValue compressoutputs(const JSONRPCRequest & request)
             "\nMake transaction with one compressed output.\n"
             "\nArguments:\n"
             "1. \"address\"     (string, required) recipient addresses\n"
-            "2. \"inputs\"      (number, required) count of inputs\n" // inputs less than amount, sort from min to max,
+            "2. \"inputs\"      (number, required) count of inputs\n"
             "3. \"send\"        (boolean, optional) send transaction after sign (default false)\n"
             "4. \"count\"       (number, optional) count of transactions (default 1)\n"
             "5. \"verbose\"     (boolean, optional) extra info (default false)\n"
@@ -944,6 +944,7 @@ UniValue compressoutputs(const JSONRPCRequest & request)
     std::chrono::system_clock::time_point t6;
     std::chrono::system_clock::time_point t7;
 
+    // hash, n, amount, height
     typedef std::tuple<uint256, uint32_t, CAmount, uint32_t> coin_t;
     std::vector<coin_t> coins;
     CAmount  totalAmount = 0;
@@ -1196,32 +1197,31 @@ UniValue compressmineoutputs(const JSONRPCRequest & request)
     if (request.fHelp || request.params.size() < 2)
     {
         throw std::runtime_error(
-            "compressmineoutputs address amount send count\n"
+            "compressmineoutputs address inputs send count verbose\n"
             "\nMake transaction with one compressed output.\n"
             "\nArguments:\n"
-            "1. \"address\"     (string, required) recipient addresses\n"
-            "2. \"amount\"      (number, required) output amount (inputs less than amount, sort from min to max)\n"
+            "1. \"address\"     (string, required) recipient addresses (not used)\n"
+            "2. \"inputs\"      (number, required) count of inputs\n"
             "3. \"send\"        (boolean, optional) send transaction after sign (default false)\n"
             "4. \"count\"       (number, optional) count of transactions (default 1)\n"
+            "5. \"verbose\"     (boolean, optional) extra info (default false)\n"
             "\nResult:\n"
             "\nExamples:\n"
             + HelpExampleCli("compressmineoutputs", "")
             + HelpExampleRpc("compressmineoutputs", ""));
     }
 
-    RPCTypeCheck(request.params, { UniValue::VSTR, UniValue::VNUM, UniValue::VBOOL, UniValue::VNUM }, true);
+    RPCTypeCheck(request.params, { UniValue::VSTR, UniValue::VNUM, UniValue::VBOOL, UniValue::VNUM, UniValue::VBOOL }, true);
 
-    CBitcoinAddress address(request.params[0].get_str());
-    if (!address.IsValid())
-    {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid PLC Ultima address");
-    }
+//    const CBitcoinAddress address(request.params[0].get_str());
+//    if (!address.IsValid())
+//    {
+//        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid PLC Ultima address");
+//    }
 
-    CAmount amount = AmountFromValue(request.params[1]);
-    if (amount <= 0)
-    {
-        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount for send");
-    }
+//    const CScript destinationScript = GetScriptForDestination(CBitcoinAddress(address).Get(Params()));
+
+    const uint32_t inputsCount = request.params[1].get_int();
 
     bool needSend = false;
     if (request.params.size() > 2 && request.params[2].get_bool())
@@ -1229,20 +1229,44 @@ UniValue compressmineoutputs(const JSONRPCRequest & request)
         needSend = true;
     }
 
-    uint32_t count = 1;
+    uint32_t totalTxCount = 1;
     if (request.params.size() > 3)
     {
-        count = request.params[3].get_int();
-        if (count == 0)
+        totalTxCount = request.params[3].get_int();
+        if (totalTxCount == 0)
         {
-            count = 1;
+            totalTxCount = 1;
         }
     }
 
+    bool isVerbose = false;
+    if (request.params.size() > 4 && request.params[4].get_bool())
+    {
+        isVerbose = true;
+    }
+
+    std::chrono::system_clock::time_point t1;
+    std::chrono::system_clock::time_point t2;
+    std::chrono::system_clock::time_point t3;
+    std::chrono::system_clock::time_point t4;
+    std::chrono::system_clock::time_point t5;
+    std::chrono::system_clock::time_point t6;
+    std::chrono::system_clock::time_point t7;
+
     LOCK2(cs_main, &pwallet->cs_wallet);
+
+    t1 = std::chrono::high_resolution_clock::now();
+
+    FlushStateToDisk();
+
+    t2 = std::chrono::high_resolution_clock::now();
 
     std::vector<COutput> coins;
     pwallet->AvailableCoins(coins, true);
+
+    uint32_t totalCount  = coins.size();
+
+    t3 = std::chrono::high_resolution_clock::now();
 
     std::sort(coins.begin(), coins.end(), [](const COutput & l, const COutput & r)
     {
@@ -1252,106 +1276,210 @@ UniValue compressmineoutputs(const JSONRPCRequest & request)
         return ltx->tx->vout[l.i].nValue > rtx->tx->vout[r.i].nValue;
     });
 
-    UniValue result(UniValue::VARR);
+    t4 = std::chrono::high_resolution_clock::now();
 
-    for (uint32_t ii = 0; ii < count; ++ii)
+    LogPrintf("Mine compresor: make %d transactions\n", totalTxCount);
+
+    // make
+    std::mutex txLocker;
+    std::mutex cnLocker;
+    std::vector<CMutableTransaction>   transactions;
+    std::vector<std::vector<CScript> > scriptPubKeys;
+
+    boost::thread_group group;
+
+    for (uint32_t i = 0; i < 1; ++i) // std::thread::hardware_concurrency() / 2; ++i)
     {
-        if (coins.empty())
+        group.create_thread([&coins, &cnLocker,
+                             &transactions, &scriptPubKeys, &txLocker,
+                            inputsCount, pwallet, totalTxCount]()
         {
-            break;
-        }
+            CBasicKeyStore dummyKeyStore;
 
-        if (coins.back().tx->tx->vout[coins.back().i].nValue > amount)
-        {
-            break;
-        }
-
-        CMutableTransaction tx;
-        tx.vout.emplace_back(CTxOut(amount, GetScriptForDestination(address.Get())));
-
-        CAmount feeNeeded      = 0;
-        CAmount selectedAmount = 0;
-        std::vector<CInputCoin> setCoins;
-
-        // Start with no fee and loop until there is enough fee
-        while (true)
-        {
-            const COutput out = coins.back();
-            coins.pop_back();
-
-            selectedAmount += out.tx->tx->vout[out.i].nValue;
-
-            tx.vin.emplace_back(CTxIn(out.tx->GetHash(), out.i));
-
-            const auto mi = pwallet->mapWallet.find(out.tx->GetHash());
-            if (mi == pwallet->mapWallet.end() || static_cast<size_t>(out.i) >= mi->second.tx->vout.size())
+            while (true)
             {
-                throw JSONRPCError(RPC_WALLET_ERROR, "Input not found");
+                CMutableTransaction  tx;
+                std::vector<CScript> txScriptPubKeys;
+                CAmount  txAmount        = 0;
+                CAmount  feeNeeded       = 0;
+                uint32_t bytes           = 0;
+
+                for (uint32_t ii = 0; ii < inputsCount; ++ii)
+                {
+                    CTxIn in;
+                    {
+                        std::lock_guard<std::mutex> l(cnLocker);
+                        if (coins.empty())
+                        {
+                            if (tx.vin.size() == 0)
+                            {
+                                // done
+                                return;
+                            }
+
+                            // no more coins
+                            break;
+                        }
+
+                        const COutput & out = coins.back();
+                        if (!out.fSpendable || !out.fSolvable)
+                        {
+                            coins.pop_back();
+                            continue;
+                        }
+                        in = CTxIn(out.tx->GetHash(), out.i);
+                        coins.pop_back();
+                    }
+
+                    const auto mi = pwallet->mapWallet.find(in.prevout.hash);
+                    if (mi == pwallet->mapWallet.end() || static_cast<size_t>(in.prevout.n) >= mi->second.tx->vout.size())
+                    {
+                        // throw JSONRPCError(RPC_WALLET_ERROR, "Input not found");
+                        continue;
+                    }
+
+                    txScriptPubKeys.emplace_back(mi->second.tx->vout[in.prevout.n].scriptPubKey);
+
+                    SignatureData dummySig;
+                    ProduceSignature(DummySignatureCreator(&dummyKeyStore), txScriptPubKeys.back(), dummySig);
+
+                    in.scriptSig = dummySig.scriptSig;
+                    tx.vin.emplace_back(in);
+
+                    // select inputs
+                    txAmount += mi->second.tx->vout[in.prevout.n].nValue;
+
+                    if (tx.vout.empty())
+                    {
+                        // use first scriptPubKey from inputs
+                        tx.vout.emplace_back(CTxOut(0, mi->second.tx->vout[in.prevout.n].scriptPubKey));
+                    }
+                }
+
+                bytes     = GetVirtualTransactionSize(tx, GetTransactionSigOpCost(tx, pcoinsdbview, STANDARD_SCRIPT_VERIFY_FLAGS));
+                feeNeeded = ::minRelayTxFee.GetFee(bytes);
+
+                // magic 1.4
+                feeNeeded *= 1.4;
+
+                tx.vout[0].nValue = txAmount - feeNeeded;
+                if (txAmount <= feeNeeded || IsDust(tx.vout[0], ::dustRelayFee))
+                {
+                    JSONRPCError(RPC_INTERNAL_ERROR, "oops, dust. need more many");
+                }
+
+                {
+                    std::lock_guard<std::mutex> l(txLocker);
+                    if (transactions.size() > totalTxCount)
+                    {
+                        // done
+                        return;
+                    }
+                    transactions.emplace_back(tx);
+                    scriptPubKeys.emplace_back(txScriptPubKeys);
+                    if (transactions.size() % 10 == 0)
+                    {
+                        LogPrintf("Mine compresor: %d transactions ready\n", transactions.size());
+                    }
+                }
             }
+        });
+    }
 
-            setCoins.emplace_back(CInputCoin(&(mi->second), out.i));   // std::make_pair(out.tx, out.i));
+    group.join_all();
 
-            if (!pwallet->DummySignTx(tx, setCoins))
+    LogPrintf("Mine compresor: %d transactions ready\n", transactions.size());
+
+    t5 = std::chrono::high_resolution_clock::now();
+
+    // sign
+    for (uint32_t i = 0; i < transactions.size(); ++i)
+    {
+        CMutableTransaction & tx = transactions[i];
+        const std::vector<CScript> & txScriptPubKeys = scriptPubKeys[i];
+
+        CTransaction txConst(tx);
+
+        for (auto & vin : tx.vin)
+        {
+            vin.scriptSig = CScript();
+            vin.scriptWitness.SetNull();
+        }
+
+        for (uint32_t iii = 0; iii < txConst.vin.size(); ++iii)
+        {
+            SignatureData sigdata;
+            if (!ProduceSignature(TransactionSignatureCreator(pwallet, &txConst, iii, txConst.vout[0].nValue, SIGHASH_ALL),
+                                  txScriptPubKeys[iii],
+                                  sigdata))
             {
                 throw JSONRPCError(RPC_WALLET_ERROR, "Signing transaction failed");
             }
 
-            uint32_t nBytes = GetVirtualTransactionSize(tx);
-            feeNeeded = pwallet->GetRequiredFee(nBytes);
-
-            if (feeNeeded + amount <= selectedAmount)
-            {
-                break;
-            }
-
-            if (coins.empty())
-            {
-                break;
-            }
+            UpdateTransaction(tx, iii, sigdata);
         }
+    }
 
-        tx.vout[0].nValue = selectedAmount - feeNeeded;
+    t6 = std::chrono::high_resolution_clock::now();
 
-        // sign
+    // send
+    if (needSend)
+    {
+        for (CMutableTransaction & tx : transactions)
         {
-            for (auto & vin : tx.vin)
+            // uint256 txid =
+            sendTransaction(EncodeHexTx(tx), maxTxFee, needSend);
+        }
+    }
+
+    t7 = std::chrono::high_resolution_clock::now();
+
+    UniValue result(UniValue::VARR);
+
+    result.push_back("flush -- " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()));
+    result.push_back("get -- "   + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count())
+                     + " ( " + std::to_string(totalCount) + " outputs )");
+    result.push_back("sort -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()));
+    result.push_back("make -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count()));
+    result.push_back("sign -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count()));
+    result.push_back("send -- "  + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count()));
+
+    if (isVerbose)
+    {
+        std::ofstream of;
+        fs::path path = GetDataDir(true) / "signed-mine.txt";
+        of.open(path.string().c_str(), std::ios_base::out | std::ios_base::trunc);
+        if (!of.is_open())
+        {
+            result.push_back(path.string() + " not opened");
+        }
+        else
+        {
+            for (const CMutableTransaction & tx : transactions)
             {
-                vin.scriptSig = CScript();
-                vin.scriptWitness.SetNull();
-            }
+                of << "\"" << EncodeHexTx(tx) << "\",";
 
-            CTransaction txConst(tx);
+                UniValue extra(UniValue::VARR);
 
-            for (uint32_t iii = 0; iii < setCoins.size(); ++iii)
-            {
-                const auto & coin = setCoins.at(iii);
-
-                const CScript& scriptPubKey = coin.txout.scriptPubKey;
-                SignatureData sigdata;
-
-                if (!ProduceSignature(TransactionSignatureCreator(pwallet, &txConst, iii, coin.txout.nValue, SIGHASH_ALL), scriptPubKey, sigdata))
+                for (const CTxIn & in : tx.vin)
                 {
-                    throw JSONRPCError(RPC_WALLET_ERROR, "Signing transaction failed");
+                    UniValue obj(UniValue::VOBJ);
+                    obj.push_back(Pair("txid", in.prevout.hash.ToString()));
+                    obj.push_back(Pair("vout", static_cast<int>(in.prevout.n)));
+                    obj.push_back(Pair("scriptPubKey", "")); // HexStr(destinationScript)));
+                    obj.push_back(Pair("amount", 0));
+                    extra.push_back(obj);
                 }
 
-                UpdateTransaction(tx, iii, sigdata);
+                of << extra.write() << std::endl;
+                // result.push_back(EncodeHexTx(tx));
             }
-
-        } // sign
-
-        UniValue o(UniValue::VOBJ);
-        o.push_back(Pair("hex", EncodeHexTx(tx)));
-
-        if (needSend)
-        {
-            uint256 txid = sendTransaction(EncodeHexTx(tx), maxTxFee, false);
-            o.push_back(Pair("txid", txid.ToString()));
+            of.close();
         }
-
-        result.push_back(o);
     }
 
     return result;
+
 #endif
 }
 

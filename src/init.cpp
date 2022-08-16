@@ -388,6 +388,7 @@ std::string HelpMessage(HelpMessageMode mode)
     strUsage += HelpMessageOpt("-sysperms", _("Create new files with system default permissions, instead of umask 077 (only effective with disabled wallet functionality)"));
 #endif
     strUsage += HelpMessageOpt("-taxfreecert=<file>", _("Certificate file for sign super-transactions without burning and swap-wallet deductions"));
+    strUsage += HelpMessageOpt("-smart-createrawtransaction", _("If the certificate file is specified, the tax free parameters for createrawtransaction will be added automatically. Default is false"));
     strUsage += HelpMessageOpt("-txindex", strprintf(_("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)"), DEFAULT_TXINDEX));
 
     strUsage += HelpMessageGroup(_("Connection options:"));

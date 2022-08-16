@@ -49,7 +49,7 @@ class MiningTest(BitcoinTestFramework):
         tmpl = node.getblocktemplate()
         self.log.info("getblocktemplate: Test capability advertised")
         assert 'proposal' in tmpl['capabilities']
-        assert 'coinbasetxn' in tmpl
+        assert 'coinbaseextrains' in tmpl
         coinbase_tx = create_coinbase(height=int(tmpl["height"]) + 1)
         # sequence numbers must not be max for nLockTime to have effect
         coinbase_tx.vin[0].nSequence = 2 ** 32 - 2

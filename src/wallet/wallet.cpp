@@ -2994,10 +2994,17 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
     int     changePosInOut  = nChangePosInOut;
 
     FeeCalculation feeCalc;
-    uint32_t       nBytes = 0;
+    uint32_t       nBytes     = 0;
+    uint32_t       iterations = 0;
 
     while (true)
     {
+        // magic 64 (don't panic, it is temporary for debug #3743)
+        if (++iterations > 64)
+        {
+            strFailReason = _("Too many iterations");
+            return false;
+        }
         // init tx
         changePosInOut = nChangePosInOut;
         txNew.vin.clear();
@@ -3020,6 +3027,18 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
             // }
 
             needSelectAgain = false;
+        }
+
+        if (Params().NetworkIDString() == CBaseChainParams::REGTEST)
+        {
+            // additional logs for debug
+            LogPrintf("CreateTransaction: Iteration:%d Amount:%d Needed:%d Selected:%d Fee:%d Burned:%d\n",
+                      iterations, sendAmount, neededAmount, selectedAmount, feeAmount, burnedAmount);
+            LogPrintf("Selected coins:\n");
+            for (const CInputCoin & ic : setCoins)
+            {
+                LogPrintf("    %s:%d amount &d", ic.outpoint.hash.ToString(), ic.outpoint.n, ic.txout.nValue);
+            }
         }
 
         // if change not returned to address from input set -
@@ -3070,7 +3089,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
             // tax free marker
             if (is_taxFree)
             {
-                txNew.vin.emplace_back(uint256(), 0);
+                txNew.vin.emplace_back(uint256(), supertransaction);
             }
         } // vin
 
