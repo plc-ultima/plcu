@@ -1754,7 +1754,7 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
     for(uint32_t i = 0; i < txTo->vin.size(); ++i)
     {
         const CTxIn & vin = txTo->vin[i];
-        COutPoint prev(vin.prevout);
+        const COutPoint prev(vin.prevout);
 
         const Coin & coin = cache->AccessCoin(prev);
 
@@ -1790,6 +1790,11 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
         }
         else
         {
+            if (prev.isMarker(supertransaction))
+            {
+                continue;
+            }
+
             txnouttype      tmpUserAddressType = TX_NONSTANDARD;
             CTxDestinations tmpUserDests;
             int             tmpUserRequired = 0;
