@@ -42,8 +42,8 @@ class TestNode():
         if timewait:
             self.rpc_timeout = timewait
         else:
-            # Wait for up to 60 seconds for the RPC server to respond
-            self.rpc_timeout = 60
+            # Wait for up to 120 seconds for the RPC server to respond
+            self.rpc_timeout = 120
         if binary is None:
             self.binary = os.getenv("PLCULTIMAD", "plcultimad")
         else:
@@ -78,12 +78,12 @@ class TestNode():
         self.running = True
         self.log.debug("plcultimad started, waiting for RPC to come up")
 
-    def wait_for_rpc_connection(self):
+    def wait_for_rpc_connection(self, my_index=None):
         """Sets up an RPC connection to the plcultimad process. Returns False if unable to connect."""
         # Poll at a rate of four times per second
         poll_per_s = 4
         for _ in range(poll_per_s * self.rpc_timeout):
-            assert self.process.poll() is None, "plcultimad exited with status %i during initialization" % self.process.returncode
+            assert self.process.poll() is None, f"plcultimad exited with status {self.process.returncode} during initialization, node {my_index}"
             try:
                 self.rpc = get_rpc_proxy(rpc_url(self.datadir, self.index, self.rpchost), self.index, timeout=self.rpc_timeout, coveragedir=self.coverage_dir)
                 self.rpc.getblockcount()

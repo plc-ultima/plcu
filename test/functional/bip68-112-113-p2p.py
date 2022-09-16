@@ -57,6 +57,7 @@ seq_disable_flag = 1<<31
 seq_random_high_bit = 1<<25
 seq_type_flag = 1<<22
 seq_random_low_bit = 1<<18
+fee = Decimal('0.00001000')
 
 # b31,b25,b22,b18 represent the 31st, 25th, 22nd and 18th bits respectively in the nSequence field
 # relative_locktimes[b31][b25][b22][b18] is a base_relative_locktime with the indicated bits set if their indices are 1
@@ -104,7 +105,7 @@ class BIP68_112_113Test(ComparisonTestFramework):
         test.run()
 
     def send_generic_input_tx(self, node, coinbases):
-        amount = BASE_CB_AMOUNT - Decimal('0.01')
+        amount = BASE_CB_AMOUNT - fee
         return node.sendrawtransaction(ToHex(self.sign_transaction(node, self.create_transaction(node, node.getblock(coinbases.pop())['tx'][0], self.nodeaddress, amount))))
 
     def create_transaction(self, node, txid, to_address, amount):
@@ -165,7 +166,7 @@ class BIP68_112_113Test(ComparisonTestFramework):
         return txs
 
     def create_bip112special(self, input, txversion):
-        tx = self.create_transaction(self.nodes[0], input, self.nodeaddress, Decimal("49.98"))
+        tx = self.create_transaction(self.nodes[0], input, self.nodeaddress, Decimal("49.98")) # ??
         tx.nVersion = txversion
         signtx = self.sign_transaction(self.nodes[0], tx)
         signtx.vin[0].scriptSig = CScript([-1, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(signtx.vin[0].scriptSig)))

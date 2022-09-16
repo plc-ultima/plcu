@@ -18,14 +18,14 @@ from test_framework.util import *
 class AbandonConflictTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
-        self.extra_args = [["-minrelaytxfee=0.00001"], []]
+        self.extra_args = [["-minrelaytxfee=0.00000100"], []]
 
     def run_test(self):
         self.nodes[1].generate(100)
         sync_blocks(self.nodes)
         balance = self.nodes[0].getbalance()
         amount10 = Decimal("10")
-        fee = Decimal("0.002")
+        fee = Decimal("0.00002000")
         txA = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), amount10)
         verify_tx_sent(self.nodes[0], txA)
         txB = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), amount10)
@@ -64,14 +64,14 @@ class AbandonConflictTest(BitcoinTestFramework):
         txAB1 = self.nodes[0].sendrawtransaction(signed["hex"])
 
         # Identify the 14.998 PLCU output
-        nAB = next(i for i, vout in enumerate(self.nodes[0].getrawtransaction(txAB1, 1)["vout"]) if vout["value"] == Decimal("14.998"))
+        nAB = next(i for i, vout in enumerate(self.nodes[0].getrawtransaction(txAB1, 1)["vout"]) if vout["value"] == amount15 - fee)
 
         #Create a child tx spending AB1 and C
         inputs = []
         inputs.append({"txid":txAB1, "vout":nAB})
         inputs.append({"txid":txC, "vout":nC})
         outputs = {}
-        feeA = Decimal('0.0398')
+        feeA = Decimal('0.00039800')
         (burnA1, burnA2, changeA) = BurnedAndChangeAmount(amount10 + amount15 - fee - feeA)
         outputs[self.nodes[0].getnewaddress()] = changeA
         outputs[GRAVE_ADDRESS_1] = burnA1
@@ -87,7 +87,7 @@ class AbandonConflictTest(BitcoinTestFramework):
         # Restart the node with a higher min relay fee so the parent tx is no longer in mempool
         # TODO: redo with eviction
         self.stop_node(0)
-        self.start_node(0, extra_args=["-minrelaytxfee=0.01"])
+        self.start_node(0, extra_args=["-minrelaytxfee=0.00010000"])
 
         # Verify txs no longer in either node's mempool
         assert_equal(len(self.nodes[0].getrawmempool()), 0)
@@ -114,7 +114,7 @@ class AbandonConflictTest(BitcoinTestFramework):
 
         # Verify that even with a low min relay fee, the tx is not reaccepted from wallet on startup once abandoned
         self.stop_node(0)
-        self.start_node(0, extra_args=["-minrelaytxfee=0.001"])
+        self.start_node(0, extra_args=["-minrelaytxfee=0.00001000"])
         assert_equal(len(self.nodes[0].getrawmempool()), 0)
         assert_equal(self.nodes[0].getbalance(), balance)
 
@@ -123,13 +123,13 @@ class AbandonConflictTest(BitcoinTestFramework):
         # But its child tx remains abandoned
         self.nodes[0].sendrawtransaction(signed["hex"])
         newbalance = self.nodes[0].getbalance()
-        assert_equal(newbalance, balance - Decimal("20") + Decimal("14.998"))
+        assert_equal(newbalance, balance - Decimal("20") + amount15 - fee)
         balance = newbalance
 
         # Send child tx again so its unabandoned
         self.nodes[0].sendrawtransaction(signed2["hex"])
         newbalance = self.nodes[0].getbalance()
-        assert_equal(newbalance, balance - Decimal("10") - Decimal("14.998") + changeA)
+        assert_equal(newbalance, balance - Decimal("10") - (amount15 - fee) + changeA)
         balance = newbalance
 
         # Remove using high relay fee again
@@ -145,7 +145,7 @@ class AbandonConflictTest(BitcoinTestFramework):
         inputs =[]
         inputs.append({"txid":txA, "vout":nA})
         outputs = {}
-        feeB = Decimal('0.01')
+        feeB = Decimal('0.00010000')
         (burnB1, burnB2, changeB) = BurnedAndChangeAmount(amount10 - feeB)
         outputs[self.nodes[1].getnewaddress()] = Decimal(changeB)
         outputs[GRAVE_ADDRESS_1] = burnB1

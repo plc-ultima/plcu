@@ -33,7 +33,7 @@ bool Coin::getMintedAmount(plc::MintingLimits & limits) const
         existing >> limits.dailyTimestamp >> limits.maxLoadCurrent;
     }
 
-    LogPrintf("%s: version %d, limit <%d - %d>, daily <%d - %d>\n",
+    LogPrint(BCLog::MINTING, "%s: version %d, limit <%d - %d>, daily <%d - %d>\n",
               __func__, version,
               limits.mintingTimestamp, limits.mintingCurrent,
               limits.dailyTimestamp, limits.maxLoadCurrent);
@@ -51,7 +51,7 @@ bool Coin::updateMintedAmount(const plc::MintingLimits & limits)
     m_storage.resize(stream.size());
     std::copy(stream.begin(), stream.end(), m_storage.begin());
 
-    LogPrintf("%s: version %d, limit <%d - %d>, daily <%d - %d>\n",
+    LogPrint(BCLog::MINTING, "%s: version %d, limit <%d - %d>, daily <%d - %d>\n",
               __func__, version,
               limits.mintingTimestamp, limits.mintingCurrent,
               limits.dailyTimestamp, limits.maxLoadCurrent);

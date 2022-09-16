@@ -146,6 +146,13 @@ class MiamiPoliceTest(BitcoinTestFramework):
         self.outpoints = []
         self.virtual_cur_time_offset = 0
 
+    def setup_chain(self):
+        cachedir = os.path.join(self.options.cachedir, 'more', 'cache_1300')
+        if os.path.isdir(self.options.cachedir) and os.path.isdir(cachedir):
+            self.log.debug(f'setup_chain, cachedir before: {self.options.cachedir}, now: {cachedir}')
+            self.options.cachedir = cachedir
+        super().setup_chain()
+
     def setup_network(self):
         super().setup_network()
 

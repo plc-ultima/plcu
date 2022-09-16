@@ -91,7 +91,9 @@ class RawTransactionsTest(BitcoinTestFramework):
         mSigObj = self.nodes[2].addmultisigaddress(2, [addr1Obj['pubkey'], addr2Obj['pubkey'], addr3Obj['pubkey']])
         mSigObjValid = self.nodes[2].validateaddress(mSigObj)
 
-        txId = self.nodes[0].sendtoaddress(mSigObj, 2.2)
+        amount_2_2 = Decimal('2.20000000')
+        fee = Decimal('0.00001000')
+        txId = self.nodes[0].sendtoaddress(mSigObj, amount_2_2)
         verify_tx_sent(self.nodes[0], txId)
         decTx = self.nodes[0].gettransaction(txId)
         rawTx = self.nodes[0].decoderawtransaction(decTx['hex'])
@@ -107,13 +109,13 @@ class RawTransactionsTest(BitcoinTestFramework):
         rawTx = self.nodes[0].decoderawtransaction(txDetails['hex'])
         vout = False
         for outpoint in rawTx['vout']:
-            if outpoint['value'] == Decimal('2.20000000'):
+            if outpoint['value'] == amount_2_2:
                 vout = outpoint
                 break
 
         bal = self.nodes[0].getbalance()
         inputs = [{ "txid" : txId, "vout" : vout['n'], "scriptPubKey" : vout['scriptPubKey']['hex']}]
-        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('2.19'))
+        (burn1, burn2, rest) = BurnedAndChangeAmount(amount_2_2 - fee)
         outputs = { self.nodes[0].getnewaddress(): rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2 }
         rawTx = self.nodes[2].createrawtransaction(inputs, outputs)
         rawTxPartialSigned = self.nodes[1].signrawtransaction(rawTx, inputs)
@@ -140,7 +142,7 @@ class RawTransactionsTest(BitcoinTestFramework):
         mSigObj = self.nodes[2].addmultisigaddress(2, [addr1Obj['pubkey'], addr2Obj['pubkey']])
         mSigObjValid = self.nodes[2].validateaddress(mSigObj)
 
-        txId = self.nodes[0].sendtoaddress(mSigObj, 2.2)
+        txId = self.nodes[0].sendtoaddress(mSigObj, amount_2_2)
         verify_tx_sent(self.nodes[0], txId)
         decTx = self.nodes[0].gettransaction(txId)
         rawTx2 = self.nodes[0].decoderawtransaction(decTx['hex'])
@@ -154,12 +156,12 @@ class RawTransactionsTest(BitcoinTestFramework):
         rawTx2 = self.nodes[0].decoderawtransaction(txDetails['hex'])
         vout = False
         for outpoint in rawTx2['vout']:
-            if outpoint['value'] == Decimal('2.20000000'):
+            if outpoint['value'] == amount_2_2:
                 vout = outpoint
                 break
 
         bal = self.nodes[0].getbalance()
-        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('2.19'))
+        (burn1, burn2, rest) = BurnedAndChangeAmount(amount_2_2 - fee)
         inputs = [{ "txid" : txId, "vout" : vout['n'], "scriptPubKey" : vout['scriptPubKey']['hex'], "redeemScript" : mSigObjValid['hex']}]
         outputs = { self.nodes[0].getnewaddress(): rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2 }
         rawTx2 = self.nodes[2].createrawtransaction(inputs, outputs)

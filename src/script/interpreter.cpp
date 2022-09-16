@@ -24,6 +24,7 @@
 #include "streams.h"
 #include "txmempool.h"
 #include "utilstrencodings.h"
+#include "util.h"
 
 typedef std::vector<unsigned char> valtype;
 
@@ -1604,7 +1605,7 @@ uint32_t getCoinWeight(const Coin & coin,
     uint32_t coinWeight = params.flags & plc::fastMinting ?
                        coinWeight2 : std::min(coinWeight1, ageOfCert);
 
-    LogPrintf("VALIDATION height %d tip %d coin %d delta %d coinWeight %d\n", chainActive.Tip()->nHeight, now, pindex->nTime, coinAge, coinWeight);
+    LogPrint(BCLog::MINTING, "height %d tip %d coin %d delta %d coinWeight %d\n", chainActive.Tip()->nHeight, now, pindex->nTime, coinAge, coinWeight);
 
     return coinWeight;
 }
@@ -2075,10 +2076,10 @@ bool TransactionSignatureChecker::CheckRewardInternal(const std::vector<plc::Cer
             return set_error(serror, SCRIPT_ERR_BAD_REWARD_ROBBERY);
         }
 
-        LogPrint(BCLog::VALIDATION,
+        LogPrint(BCLog::MINTING,
                  "%s: silver hooves knocking on a money box, %d yo-ho-ho and the bottle of rum!\n",
                  __func__, hoofAmount);
-        LogPrint(BCLog::VALIDATION,
+        LogPrint(BCLog::MINTING,
                  "%s: %s\n",
                  __func__, txTo->GetHash().ToString());
         return true;

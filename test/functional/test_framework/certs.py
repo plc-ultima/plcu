@@ -63,11 +63,12 @@ def flag_to_str(flag):
         SILVER_HOOF: 'SILVER_HOOF',
         SUPER_TX: 'SUPER_TX',
         ALLOW_MINING: 'ALLOW_MINING',
+        MASTER_OF_TIME: 'MASTER_OF_TIME',
     }
     if flag in flags:
         return flags[flag]
     logger.debug(f'unknownw flag: {flag}')
-    assert (0)
+    assert 0, f'unknownw flag: {flag}'
     # return 'unknown'
 
 
@@ -205,7 +206,8 @@ def compose_tx_spending_locked_outputs(input_utxos, input_key, dest_scripts_and_
 
 
 def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVICE_KEY | SILVER_HOOF,
-                    child_key=None, prev_scriptpubkey=None, block1a=None, block2a=None, block1_hash=None, parent_key_for_block2=None):
+                    child_key=None, prev_scriptpubkey=None, block1a=None, block2a=None, block1_hash=None,
+                    parent_key_for_block2=None):
     parent_pubkey_bin = parent_key.get_pubkey()
     pubkeyhash = hash160(parent_pubkey_bin)
     child_key = child_key if child_key else create_key()
@@ -239,7 +241,8 @@ def compose_cert_tx(utxo_coins, amount, parent_key, name=None, flags = HAS_DEVIC
     return (tx2, child_key)
 
 
-def compose_mint_tx(user_utxos, moneybox_utxos, utxo_cert_root, utxo_cert_ca3, user_key, user_amount, lock_timepoint, reward_amount, reward_change, use_burn):
+def compose_mint_tx(user_utxos, moneybox_utxos, utxo_cert_root, utxo_cert_ca3, user_key, user_amount, lock_timepoint,
+                    reward_amount, reward_change, use_burn):
     tx3 = CTransaction()
     reward_amount = ToCoins(reward_amount)
 
@@ -249,7 +252,8 @@ def compose_mint_tx(user_utxos, moneybox_utxos, utxo_cert_root, utxo_cert_ca3, u
         tx3.vin.append(CTxIn(moneybox_utxo, GetP2SHMoneyboxScript(), 0xffffffff))
 
     # append user_outputs to tx:
-    tx3.vout.append(CTxOut(ToSatoshi(user_amount), GetP2PKHScriptWithTimeLock(hash160(user_key.get_pubkey()), lock_timepoint)))
+    tx3.vout.append(
+        CTxOut(ToSatoshi(user_amount), GetP2PKHScriptWithTimeLock(hash160(user_key.get_pubkey()), lock_timepoint)))
 
     # append reward_outputs to tx:
     (burn1, burn2, reward_payed) = BurnedAndChangeAmount(reward_amount) if reward_amount > 0 and use_burn else (0, 0, reward_amount)
@@ -352,7 +356,8 @@ def generate_certs_pair(node, test_node, root_cert_key=None, root_cert_flags=Non
                                             parent_key_for_block2=root_cert_sig_key)
     root_cert_hash = root_cert_hash if root_cert_hash else send_tx(node, test_node, tx2, True)
     if root_cert_revoked:
-        prev_scriptpubkey = CScript(hex_str_to_bytes(node.getrawtransaction(root_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
+        prev_scriptpubkey = CScript(
+            hex_str_to_bytes(node.getrawtransaction(root_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
         (tx2a, _) = compose_cert_tx(COutPoint(int(root_cert_hash, 16), 0), Decimal('0.9'), root_cert_key,
                                     root_cert_name, root_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
         send_tx(node, test_node, tx2a, True)
@@ -370,7 +375,8 @@ def generate_certs_pair(node, test_node, root_cert_key=None, root_cert_flags=Non
     super_key = super_key if super_key else super_key1
     print_key_verbose(super_key, f'super_key')
     if pass_cert_revoked:
-        prev_scriptpubkey = CScript(hex_str_to_bytes(node.getrawtransaction(pass_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
+        prev_scriptpubkey = CScript(
+            hex_str_to_bytes(node.getrawtransaction(pass_cert_hash, 1)['vout'][0]['scriptPubKey']['hex']))
         (tx2a, _) = compose_cert_tx(COutPoint(int(pass_cert_hash, 16), 0), Decimal('0.9'), pass_cert_key,
                                     pass_cert_name, pass_cert_flags, prev_scriptpubkey=prev_scriptpubkey)
         send_tx(node, test_node, tx2a, True)
@@ -379,21 +385,23 @@ def generate_certs_pair(node, test_node, root_cert_key=None, root_cert_flags=Non
     return (root_cert_hash, pass_cert_hash, super_key)
 
 
-def restart_node_with_cert(test_fr, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None, accepted=True, gen_block=True, index=0, next_index=1):
-    assert_greater_than_or_equal(test_fr.num_nodes, 2)
+def restart_node_with_cert(test_fr, use_cert, super_key_pubkey=None, root_cert_hash=None, pass_cert_hash=None,
+                           accepted=True, gen_block=True, index=0, next_indexes=[1], more_args=[], nodes_to_sync=None):
+    nodes_to_sync = nodes_to_sync if nodes_to_sync else test_fr.nodes
     node0 = test_fr.nodes[index]
-    node1 = test_fr.nodes[next_index]
-    test_fr.sync_all()
+    sync_blocks(nodes_to_sync)
     if use_cert:
         write_taxfree_cert_to_file(test_fr.taxfree_cert_filename, super_key_pubkey, root_cert_hash, pass_cert_hash)
     test_fr.stop_node(index)
-    more_args = [f'-taxfreecert={test_fr.taxfree_cert_filename}'] if use_cert else []
-    test_fr.start_node(index, extra_args=test_fr.extra_args[index] + more_args)
-    connect_nodes(node0, next_index)
+    cert_args = [f'-taxfreecert={test_fr.taxfree_cert_filename}'] if use_cert else []
+    test_fr.start_node(index, extra_args=test_fr.extra_args[index] + more_args + cert_args)
+    for next_index in next_indexes:
+        connect_nodes(node0, next_index)
     if use_cert and accepted:
         assert_equal(node0.getwalletinfo()['taxfree_certificate'], test_fr.taxfree_cert_filename)
     elif not use_cert:
         assert_not_in('taxfree_certificate', node0.getwalletinfo())
     if gen_block:
+        node1 = test_fr.nodes[next_indexes[0]]
         node1.generate(1)
-        test_fr.sync_all()
+        sync_blocks(nodes_to_sync)

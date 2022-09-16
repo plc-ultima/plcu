@@ -55,6 +55,15 @@ TEST_EXIT_PASSED = 0
 TEST_EXIT_SKIPPED = 77
 PYTHON_BIN = os.getenv('PYTHON_BIN') or 'python3'
 
+
+def replace_flag(flags, name, value, skip_check=False):
+    for i, flag in enumerate(flags):
+        if flag.startswith(f'--{name}='):
+            flags[i] = f'--{name}={value}'
+            return
+    assert skip_check, f'flag {name} not found in {flags}'
+
+
 BASE_SCRIPTS= [
     # Scripts that are run by the travis build process.
     # Longest test should go first, to favor running tests in parallel
@@ -251,6 +260,7 @@ def main():
                         help="File that will store JUnit formatted test results. If no absolute path is given it is treated as relative to the temporary directory.")
     parser.add_argument('--testsuitename', '-n', default='PLC Ultima Node functional tests',
                         help="Name of the test suite, as it will appear in the logs and in the JUnit report.")
+    parser.add_argument('--timeout', type=str, default=None, help='Timeout, m/h/d/w suffix may be used, without suffix is in seconds, default None')
     args, unknown_args = parser.parse_known_args()
 
     # args to be passed on always start with two dashes; tests are the remaining unknown args
@@ -274,6 +284,25 @@ def main():
 
     logging.debug("Temporary test directory at %s" % tmpdir)
     logging.debug("jobs: %d" % args.jobs)
+    if args.timeout:
+        suffix = args.timeout[-1]
+        if not suffix.isdigit():
+            value = int(args.timeout[:-1])
+            assert suffix in ['s', 'm', 'h', 'd', 'w'], f'invalid suffix: {suffix}'
+            if suffix == 'm':
+                value *= 60
+            elif suffix == 'h':
+                value *= 3600
+            elif suffix == 'd':
+                value *= 3600 * 24
+            elif suffix == 'w':
+                value *= 3600 * 24 * 7
+        else:
+            value = int(args.timeout)
+        args.timeout = value
+    if args.timeout:
+        logging.debug(f"timeout: {args.timeout} (now {datetime.datetime.now()})")
+    start_point = time.time()
 
     if not os.path.isabs(args.junitoutput):
         args.junitoutput = os.path.join(tmpdir, args.junitoutput)
@@ -340,9 +369,9 @@ def main():
     if not args.keepcache:
         shutil.rmtree("%s/test/cache" % config["environment"]["BUILDDIR"], ignore_errors=True)
 
-    run_tests(test_list, config["environment"]["SRCDIR"], config["environment"]["BUILDDIR"], config["environment"]["EXEEXT"], args.junitoutput, tmpdir, args.jobs, args.testsuitename, args.coverage, passon_args)
+    run_tests(test_list, config["environment"]["SRCDIR"], config["environment"]["BUILDDIR"], config["environment"]["EXEEXT"], args.junitoutput, tmpdir, args.jobs, args.testsuitename, args.coverage, passon_args, start_point, args.timeout)
 
-def run_tests(test_list, src_dir, build_dir, exeext, junitoutput, tmpdir, jobs=1, test_suite_name="PLCU", enable_coverage=False, args=[]):
+def run_tests(test_list, src_dir, build_dir, exeext, junitoutput, tmpdir, jobs=1, test_suite_name="PLCU", enable_coverage=False, args=[], start_point=0, timeout=0):
     # Warn if plcultimad is already running (unix only)
     try:
         if subprocess.check_output(["pidof", "plcultimad"]) is not None:
@@ -374,30 +403,61 @@ def run_tests(test_list, src_dir, build_dir, exeext, junitoutput, tmpdir, jobs=1
 
     if len(test_list) > 1 and jobs > 1:
         # Populate cache
+        print(f'[{datetime.datetime.now().time()}] Creating normal cache...')
         subprocess.check_output([PYTHON_BIN, tests_dir + 'create_cache.py'] + flags + ["--tmpdir=%s/cache" % tmpdir])
 
+        print(f'[{datetime.datetime.now().time()}] Creating minting moneybox_inputs cache...')
+        subprocess.check_output([PYTHON_BIN, tests_dir + 'minting.py'] + flags + ["--tmpdir=%s/cache" % tmpdir])
+        cache_dir_minting = os.path.join(cache_dir, 'minting')
+
+        parent_cache_dir = cache_dir
+        for value in [400, 500, 1300, 1400, 1500]:
+            print(f'[{datetime.datetime.now().time()}] Creating cache with {value} blocks...')
+            this_cache_dir = os.path.join(cache_dir, 'more', f'cache_{value}')
+            replace_flag(flags, 'cachedir', this_cache_dir)
+            subprocess.check_output([PYTHON_BIN, tests_dir + 'create_cache.py'] + flags + [f"--tmpdir={tmpdir}/cache",
+                                                                                           f'--customcacheheight={value}',
+                                                                                           f'--parentcache={parent_cache_dir}'])
+            # Redirect minting cache to cache_dir_minting, moneybox_inputs cache must be single for all custom caches:
+            this_cache_dir_minting = os.path.join(this_cache_dir, 'minting')
+            if not os.path.isdir(this_cache_dir_minting):
+                # if run with --keepcache, it may already exist
+                os.symlink(cache_dir_minting, this_cache_dir_minting)
+            parent_cache_dir = this_cache_dir
+
+    # Restore original cachedir:
+    replace_flag(flags, 'cachedir', cache_dir)
+
     #Run Tests
+    print(f'[{datetime.datetime.now().time()}] Running tests')
     job_queue = TestHandler(jobs, tests_dir, tmpdir, test_list, flags)
     time0 = time.time()
     test_results = []
+    start_point = start_point if start_point else time0
 
     max_len_name = len(max(test_list, key=len))
 
     for _ in range(len(test_list)):
-        test_result, stdout, stderr = job_queue.get_next()
+        test_result, stdout, stderr = job_queue.get_next(start_point, timeout)
         test_results.append(test_result)
 
         if test_result.status == "Passed":
             logging.debug("\n%s%s%s passed, Duration: %s s" % (BOLD[1], test_result.name, BOLD[0], test_result.time))
         elif test_result.status == "Skipped":
             logging.debug("\n%s%s%s skipped" % (BOLD[1], test_result.name, BOLD[0]))
+        elif test_result.status == "Expired":
+            logging.debug("\n%s%s%s time expired" % (BOLD[1], test_result.name, BOLD[0]))
+        elif test_result.status == "Killed":
+            logging.debug("\n%s%s%s killed, Duration: %s s" % (BOLD[1], test_result.name, BOLD[0], test_result.time))
         else:
             print("\n%s%s%s failed, Duration: %s s\n" % (BOLD[1], test_result.name, BOLD[0], test_result.time))
             print(BOLD[1] + 'stdout:\n' + BOLD[0] + stdout + '\n')
             print(BOLD[1] + 'stderr:\n' + BOLD[0] + stderr + '\n')
 
-    runtime = int(time.time() - time0)
-    print_results(test_results, max_len_name, runtime)
+    now = time.time()
+    runtime = int(now - time0)
+    full_runtime = int(now - start_point)
+    print_results(test_results, max_len_name, runtime, full_runtime)
     save_results_as_junit(test_results, junitoutput, runtime, test_suite_name)
 
     if coverage:
@@ -414,7 +474,7 @@ def run_tests(test_list, src_dir, build_dir, exeext, junitoutput, tmpdir, jobs=1
 
     sys.exit(not all_passed)
 
-def print_results(test_results, max_len_name, runtime):
+def print_results(test_results, max_len_name, runtime, full_runtime):
     results = "\n" + BOLD[1] + "%s | %s | %s\n\n" % ("TEST".ljust(max_len_name), "STATUS   ", "DURATION") + BOLD[0]
 
     test_results.sort(key=lambda result: result.name.lower())
@@ -431,7 +491,7 @@ def print_results(test_results, max_len_name, runtime):
 
     status = TICK + "Passed" if all_passed else CROSS + f"Failed ({failed_cnt})"
     results += BOLD[1] + "\n%s | %s | %s s (accumulated) \n" % ("ALL".ljust(max_len_name), status.ljust(9), time_sum) + BOLD[0]
-    results += "Runtime: %s s\n" % (runtime)
+    results += f"Runtime: {runtime} s (with creating cache: {full_runtime} s)\n"
     print(results)
 
 class TestHandler:
@@ -453,7 +513,11 @@ class TestHandler:
         self.portseed_offset = int(time.time() * 1000) % 625
         self.jobs = []
 
-    def get_next(self):
+    def get_next(self, start_point, timeout=0):
+        timeout_expired = timeout and int(time.time() - start_point) > timeout
+        if timeout_expired and self.test_list:
+            t = self.test_list.pop(0)
+            return TestResult(t, 'Expired', 0, None, None), None, None
         while self.num_running < self.num_jobs and self.test_list:
             # Add tests
             self.num_running += 1
@@ -477,9 +541,10 @@ class TestHandler:
         while True:
             # Return first proc that finishes
             time.sleep(.5)
+            timeout_expired = timeout and int(time.time() - start_point) > timeout
             for j in self.jobs:
                 (name, time0, proc, log_out, log_err) = j
-                if os.getenv('TRAVIS') == 'true' and int(time.time() - time0) > 20 * 60:
+                if (os.getenv('TRAVIS') == 'true' and int(time.time() - time0) > 20 * 60) or timeout_expired:
                     # In travis, timeout individual tests after 20 minutes (to stop tests hanging and not
                     # providing useful output.
                     proc.send_signal(signal.SIGINT)
@@ -492,12 +557,14 @@ class TestHandler:
                     elif proc.returncode == TEST_EXIT_SKIPPED:
                         status = "Skipped"
                     else:
-                        status = "Failed"
+                        status = "Killed" if timeout_expired else "Failed"
                     self.num_running -= 1
                     self.jobs.remove(j)
 
                     return TestResult(name, status, int(time.time() - time0), stdout, stderr), stdout, stderr
             print('.', end='', flush=True)
+
+FAILED_STATUSES = ["Failed", "Killed", "Expired"]
 
 class TestResult():
     def __init__(self, name, status, time, stdout, stderr):
@@ -512,7 +579,7 @@ class TestResult():
         if self.status == "Passed":
             color = BLUE
             glyph = TICK
-        elif self.status == "Failed":
+        elif self.status in FAILED_STATUSES:
             color = RED
             glyph = CROSS
         elif self.status == "Skipped":
@@ -523,7 +590,7 @@ class TestResult():
 
     @property
     def was_successful(self):
-        return self.status != "Failed"
+        return self.status not in FAILED_STATUSES
 
 
 def check_script_list(src_dir):

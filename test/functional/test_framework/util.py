@@ -37,6 +37,7 @@ TXIN_MARKER_SUPERTX = 0  # TxInMarkerType::supertransaction in cpp
 TXIN_MARKER_TOTAL_AMOUNT = 1  # TxInMarkerType::totalAmount in cpp
 START_TOTAL_NG_BLOCK = 550  # consensus.startTotalNgBlock in cpp
 CLTV_HEIGHT = 1351
+MAX_FEE = Decimal('0.001')
 
 GRAVE_ADDRESS_1 = GRAVE_ADDRESS_1_TESTNET
 GRAVE_ADDRESS_2 = GRAVE_ADDRESS_2_TESTNET
@@ -727,15 +728,19 @@ def node_listunspent(node, minconf=1, maxconf=9999999, addresses=[], include_uns
         query_options['minimumSumAmount'] = minimumSumAmount
     return node.listunspent(minconf, maxconf, addresses, include_unsafe, query_options)
 
-def find_burned_amount_in_tx(tx):
+def find_burned_amount_in_tx(tx, burn_exists=True):
     burned = 0
     outputs = 0
     for detail in tx['details']:
         if detail['address'] == GRAVE_ADDRESS_1 or detail['address'] == GRAVE_ADDRESS_2:
             burned += detail['amount']
             outputs += 1
-    assert_greater_than(abs(burned), 0)
-    assert_equal(outputs, 2)
+    if burn_exists:
+        assert_greater_than(abs(burned), 0)
+        assert_equal(outputs, 2)
+    elif burn_exists is not None:
+        assert_equal(burned, 0)
+        assert_equal(outputs, 0)
     return burned
 
 # total_out_amount == input_amount - fee
@@ -771,13 +776,19 @@ def skip_spam_from_tx(tx_json):
     vout = tx_json['vout']
     vout[:] = [x for x in vout if x['scriptPubKey']['type'] != 'nulldata']
 
-def print_tx_verbose(node, txid=None, tx_hex=None, tx_json=None, indent=0, skip_spam=False, comment=None):
+def print_tx_verbose(node, txid=None, tx_hex=None, tx_json=None, indent=0, skip_spam=False, skip_parents=False, comment=None):
     assert txid or tx_hex or tx_json
     tx_json = tx_json if tx_json else (node.decoderawtransaction(tx_hex) if tx_hex else node.getrawtransaction(txid, 1))
     if comment:
         logger.debug(comment)
     for input in tx_json['vin']:
-        logger.debug(f'{" " * indent}parent tx: {node.getrawtransaction(input["txid"], 1)}')
+        parent_tx_id = input["txid"]
+        if skip_parents:
+            logger.debug(f'{" " * indent}parent tx {parent_tx_id}: skipped')
+        elif int(input["txid"], 16):
+            logger.debug(f'{" " * indent}parent tx: {node.getrawtransaction(parent_tx_id, 1)}')
+        else:
+            logger.debug(f'{" " * indent}parent tx {parent_tx_id}: zero input')
     if skip_spam:
         skip_spam_from_tx(tx_json)
     logger.debug(f'{" " * indent}this tx: {tx_json}')
@@ -806,6 +817,7 @@ def verify_tx_sent(node, txid):
     assert_in(txid, node.getrawmempool())
     fee = -node.gettransaction(txid)['fee']
     assert_greater_than(fee, 0)
+    assert_greater_than(MAX_FEE, fee)
 
 def read_uint_from_buffer(buffer):
     buf_len = len(buffer)

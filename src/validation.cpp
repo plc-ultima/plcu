@@ -2183,7 +2183,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
         CBlock prevblock;
         if (!(pindex->pprev && ReadBlockFromDisk(prevblock, pindex->pprev, Params().GetConsensus())))
         {
-            LogPrint(BCLog::VALIDATION, "Preg block not found, %s for %s",
+            LogPrint(BCLog::VALIDATION, "Prev block not found, %s for %s",
                      pindex->GetBlockHash().ToString(),
                      pindex->pprev ? pindex->pprev->GetBlockHash().ToString() : "NULL");
         }
@@ -2984,7 +2984,7 @@ static void NotifyHeaderTip() {
 
         if (pindexHeader != pindexHeaderOld) {
             fNotify = true;
-            fInitialBlockDownload = IsInitialBlockDownload();
+            fInitialBlockDownload = -IsInitialBlockDownload();
             pindexHeaderOld = pindexHeader;
         }
     }

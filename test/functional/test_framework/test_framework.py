@@ -93,6 +93,10 @@ class BitcoinTestFramework(object):
                           help="Location of the test framework config file")
         parser.add_option("--pdbonfailure", dest="pdbonfailure", default=False, action="store_true",
                           help="Attach a python debugger if test fails")
+        parser.add_option("--customcacheheight", default=None, type='int',
+                          help="Height of custom cache chain, must be more than 200 and multiple of 100, default None")
+        parser.add_option("--parentcache", default=None, type='str',
+                          help="Parent cache for given custom cache, if not given, will be generated from the beginning, default None")
         self.add_options(parser)
         (self.options, self.args) = parser.parse_args()
 
@@ -107,7 +111,7 @@ class BitcoinTestFramework(object):
         # Set up temp directory and start logging
         if self.options.tmpdir:
             self.options.tmpdir = os.path.abspath(self.options.tmpdir)
-            os.makedirs(self.options.tmpdir, exist_ok=False)
+            os.makedirs(self.options.tmpdir, exist_ok=self.options.nocleanup)
         else:
             self.options.tmpdir = tempfile.mkdtemp(prefix="test")
         self._start_logging()
@@ -190,6 +194,8 @@ class BitcoinTestFramework(object):
         self.log.info("Initializing test directory " + self.options.tmpdir)
         if self.setup_clean_chain:
             self._initialize_chain_clean()
+        elif self.options.parentcache and self.options.customcacheheight:
+            self._initialize_chain_from_parent()
         else:
             self._initialize_chain()
 
@@ -236,7 +242,7 @@ class BitcoinTestFramework(object):
         node = self.nodes[i]
 
         node.start(extra_args, stderr)
-        node.wait_for_rpc_connection()
+        node.wait_for_rpc_connection(i)
 
         if self.options.coveragedir is not None:
             coverage.write_all_rpc_commands(self.options.coveragedir, node.rpc)
@@ -250,8 +256,8 @@ class BitcoinTestFramework(object):
         try:
             for i, node in enumerate(self.nodes):
                 node.start(extra_args[i])
-            for node in self.nodes:
-                node.wait_for_rpc_connection()
+            for i, node in enumerate(self.nodes):
+                node.wait_for_rpc_connection(i)
         except:
             # If one node failed to start, stop the others
             self.stop_nodes()
@@ -282,7 +288,7 @@ class BitcoinTestFramework(object):
                 self.start_node(i, extra_args, stderr=log_stderr)
                 self.stop_node(i)
             except Exception as e:
-                assert 'plcultimad exited' in str(e)  # node must have shutdown
+                assert 'plcultimad exited' in str(e), f'another error got: {e}'  # node must have shutdown
                 self.nodes[i].running = False
                 self.nodes[i].process = None
                 if expected_msg is not None:
@@ -394,8 +400,8 @@ class BitcoinTestFramework(object):
                 self.start_node(i)
 
             # Wait for RPC connections to be ready
-            for node in self.nodes:
-                node.wait_for_rpc_connection()
+            for i, node in enumerate(self.nodes):
+                node.wait_for_rpc_connection(i)
 
             # Create a 200-block-long chain; each of the 4 first nodes
             # gets 25 mature blocks and 25 immature.
@@ -430,7 +436,77 @@ class BitcoinTestFramework(object):
             from_dir = os.path.join(self.options.cachedir, "node" + str(i))
             to_dir = os.path.join(self.options.tmpdir, "node" + str(i))
             shutil.copytree(from_dir, to_dir)
-            initialize_datadir(self.options.tmpdir, i)  # Overwrite port/rpcport in bitcoin.conf
+            initialize_datadir(self.options.tmpdir, i)  # Overwrite port/rpcport in plcultima.conf
+
+
+    def _initialize_chain_from_parent(self):
+        height = self.options.customcacheheight
+        self.log.debug(f'Entering _initialize_chain_from_parent, height required: {height}, cachedir: {self.options.cachedir}, parentcache: {self.options.parentcache}')
+
+        assert self.num_nodes <= MAX_NODES, f'invalid self.num_nodes: {self.num_nodes}'
+        assert height > 200 and height % 100 == 0, f'invalid height: {height}'
+        create_cache = False
+        for i in range(MAX_NODES):
+            if not os.path.isdir(os.path.join(self.options.cachedir, 'node' + str(i))):
+                create_cache = True
+                break
+
+        if create_cache:
+            # find and delete old cache directories if any exist
+            for i in range(MAX_NODES):
+                if os.path.isdir(os.path.join(self.options.cachedir, "node" + str(i))):
+                    shutil.rmtree(os.path.join(self.options.cachedir, "node" + str(i)))
+
+            os.makedirs(self.options.cachedir, exist_ok=True)
+
+            if self.options.parentcache:
+                self.log.debug(f"Copying data directories from parent cache {self.options.parentcache} to {self.options.cachedir}")
+                for i in range(MAX_NODES):
+                    from_dir = os.path.join(self.options.parentcache, "node" + str(i))
+                    to_dir = os.path.join(self.options.cachedir, "node" + str(i))
+                    shutil.copytree(from_dir, to_dir)
+                    initialize_datadir(self.options.cachedir, i)  # Overwrite port/rpcport in plcultima.conf
+            else:
+                self.log.debug(f"No parent cache, initialize_datadir {self.options.cachedir}")
+                for i in range(MAX_NODES):
+                    initialize_datadir(self.options.cachedir, i)
+
+            self.log.debug("Starting nodes...")
+
+            # Create cache directories, run plcultimads:
+            for i in range(MAX_NODES):
+                datadir = os.path.join(self.options.cachedir, "node" + str(i))
+                args = [os.getenv("PLCULTIMAD", "plcultimad"), "-server", "-keypool=1", "-datadir=" + datadir, "-discover=0"]
+                if i > 0:
+                    args.append("-connect=127.0.0.1:" + str(p2p_port(0)))
+                self.nodes.append(TestNode(i, self.options.cachedir, extra_args=[], rpchost=None, timewait=None, binary=None, stderr=None, mocktime=self.mocktime, coverage_dir=None))
+                self.nodes[i].args = args
+                self.start_node(i)
+
+            # Wait for RPC connections to be ready
+            for i, node in enumerate(self.nodes):
+                node.wait_for_rpc_connection(i)
+
+            self.log.debug(f'nodes started, actual height: {self.nodes[0].getblockcount()}')
+
+            while self.nodes[0].getblockcount() < height:
+                for peer in range(4):
+                    self.nodes[peer].generate(25)
+                    # Must sync before next peer starts generating blocks
+                    sync_blocks(self.nodes)
+                self.log.debug(f'generated next portion, now height: {self.nodes[0].getblockcount()}')
+
+            # Shut them down, and clean up cache directories:
+            self.log.debug("Stopping nodes...")
+            self.stop_nodes()
+            self.nodes = []
+            self.disable_mocktime()
+            for i in range(MAX_NODES):
+                os.remove(log_filename(self.options.cachedir, i, "debug.log"))
+                os.remove(log_filename(self.options.cachedir, i, "db.log"))
+                os.remove(log_filename(self.options.cachedir, i, "peers.dat"))
+                os.remove(log_filename(self.options.cachedir, i, "fee_estimates.dat"))
+
 
     def _initialize_chain_clean(self):
         """Initialize empty blockchain for use by the test.

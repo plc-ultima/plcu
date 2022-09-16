@@ -18,7 +18,7 @@ NODE_2 = 2
 WIT_V0 = 0
 WIT_V1 = 1
 BASE_AMOUNT = BASE_CB_AMOUNT
-FEE = Decimal("0.001")
+FEE = Decimal("0.00001000")
 
 # Create a scriptPubKey corresponding to either a P2WPKH output for the
 # given pubkey, or a P2WSH output of a 1-of-1 multisig for the given
@@ -275,7 +275,7 @@ class SegWitTest(BitcoinTestFramework):
         # Now create tx3, which will spend from txid2
         tx = CTransaction()
         tx.vin.append(CTxIn(COutPoint(int(txid2, 16), 0), b""))
-        tx.vout.append(CTxOut(ToSatoshi(restB - FEE*50), CScript([OP_TRUE]))) # Huge fee
+        tx.vout.append(CTxOut(ToSatoshi(restB - FEE*40), CScript([OP_TRUE]))) # Huge fee
         tx.calc_sha256()
         txid3 = self.nodes[0].sendrawtransaction(ToHex(tx))
         assert(tx.wit.is_null())

@@ -44,11 +44,13 @@ public:
     virtual bool HaveWatchOnly(const CScript &dest) const =0;
     virtual bool HaveWatchOnly() const =0;
 
+    virtual void reloadCerts() = 0;
     virtual bool hasTaxFreeCert() const = 0;
     virtual bool getCert(std::vector<std::vector<unsigned char> > & pubkeys,
                          std::vector<plc::Certificate> & certs) const = 0;
     virtual bool setCert(const std::vector<std::vector<unsigned char> > & pubkeys,
                          const std::vector<plc::Certificate> & certs) = 0;
+    virtual void resetCert() = 0;
 };
 
 typedef std::map<CKeyID, CKey> KeyMap;
@@ -117,11 +119,13 @@ public:
     virtual bool HaveWatchOnly(const CScript &dest) const override;
     virtual bool HaveWatchOnly() const override;
 
+    virtual void reloadCerts() override {}
     virtual bool hasTaxFreeCert() const override;
     virtual bool getCert(std::vector<std::vector<unsigned char> > & pubkeys,
                          std::vector<plc::Certificate> & certs) const override;
     virtual bool setCert(const std::vector<std::vector<unsigned char> > & pubkeys,
                          const std::vector<plc::Certificate> & certs) override;
+    virtual void resetCert() override;
 };
 
 typedef std::vector<unsigned char, secure_allocator<unsigned char> > CKeyingMaterial;

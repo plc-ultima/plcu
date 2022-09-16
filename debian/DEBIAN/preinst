@@ -1,0 +1,7 @@
+#!/bin/sh -e
+
+PLC_USERNAME="plcultima"
+
+if ! getent passwd ${PLC_USERNAME} >/dev/null 2>&1; then
+    adduser --system --no-create-home --quiet --group ${PLC_USERNAME} 
+fi

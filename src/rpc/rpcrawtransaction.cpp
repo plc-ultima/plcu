@@ -464,6 +464,7 @@ UniValue createrawtransaction(const JSONRPCRequest& request)
     if (gArgs.GetBoolArg("-smart-createrawtransaction", false))
     {
         CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+        pwallet->reloadCerts();
         if (pwallet->hasTaxFreeCert())
         {
             rawTx.vin.emplace_back(uint256(), supertransaction);
@@ -956,10 +957,12 @@ UniValue signrawtransaction(const JSONRPCRequest& request)
     }
 
 #ifdef ENABLE_WALLET
-    const CKeyStore& keystore = ((fGivenKeys || !pwallet) ? tempKeystore : *pwallet);
+    CKeyStore& keystore = ((fGivenKeys || !pwallet) ? tempKeystore : *pwallet);
 #else
-    const CKeyStore& keystore = tempKeystore;
+    CKeyStore& keystore = tempKeystore;
 #endif
+
+    keystore.reloadCerts();
 
     int nHashType = SIGHASH_ALL;
     if (request.params.size() > 3 && !request.params[3].isNull()) {

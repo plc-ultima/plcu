@@ -64,7 +64,8 @@ class TotalEmissionTest(BitcoinTestFramework):
         self.test_node2.sync_with_ping()
 
 
-    def run_scenario(self, name, tx_list, total_delta=None, node_index=0, accepted=True, reject_reason=None, full_check=True, refill_mb=None, verbose=True):
+    def run_scenario(self, name, tx_list, total_delta=None, node_index=0, accepted=True, reject_reason=None,
+                     full_check=True, refill_mb=None, verbose=True):
         self.log.debug(f'Run scenario {name}, total_delta: {total_delta}, refill_mb: {refill_mb} ...')
         assert_in(node_index, [0,2])
         node = self.nodes[node_index]
@@ -210,7 +211,8 @@ class TotalEmissionTest(BitcoinTestFramework):
         self.test_node.add_connection(connection)
 
         node1.importprivkey(SecretBytesToBase58(self.super_key_holy.get_secret()))
-        restart_node_with_cert(self, True, self.super_key_holy.get_pubkey(), self.root_cert_hash_holy, self.pass_cert_hash_holy, gen_block=False, index=1, next_index=2)
+        restart_node_with_cert(self, True, self.super_key_holy.get_pubkey(), self.root_cert_hash_holy,
+                               self.pass_cert_hash_holy, gen_block=False, index=1, next_indexes=[2])
         connect_nodes(node0, 1)
         node0.generate(1)
         self.sync_all()

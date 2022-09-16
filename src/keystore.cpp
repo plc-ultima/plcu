@@ -148,10 +148,20 @@ bool CBasicKeyStore::setCert(const std::vector<std::vector<unsigned char> > & pu
     plc::CertParameters params;
     if (!plc::Validator().validateChainOfCerts(certs, pubkeys, params))
     {
+        resetCert();
         return false;
     }
     m_taxfreePubkeys = pubkeys;
     m_taxfreeCerts   = certs;
     m_taxFreeParams  = params;
     return true;
+}
+
+//******************************************************************************
+//******************************************************************************
+void CBasicKeyStore::resetCert()
+{
+    m_taxfreePubkeys.clear();
+    m_taxfreeCerts.clear();
+    m_taxFreeParams = plc::CertParameters();
 }

@@ -25,7 +25,7 @@ class MempoolCoinbaseTest(BitcoinTestFramework):
         # Mine a new block
         # ... make sure all the transactions are confirmed again.
 
-        fee = Decimal('0.01')
+        fee = Decimal('0.00001000')
         (burn1, burn2, rest) = BurnedAndChangeAmount(BASE_CB_AMOUNT - fee)
         b = [ self.nodes[0].getblockhash(n) for n in range(1, 4) ]
         coinbase_txids = [ self.nodes[0].getblock(h)['tx'][0] for h in b ]

@@ -1,0 +1,20 @@
+Source: plcultima
+Section: utils
+Priority: optional
+Maintainer: PLCU <info@plcu.io>
+Build-Depends: debhelper (>= 5), dh-systemd (>= 1.5)
+Homepage: https://plcu.info/
+Version: <<<please check ci script and fix line no for sed>>>
+Package: plcultimad
+Architecture: <<<please check ci script and fix line no for sed>>>
+Depends: adduser
+Description: peer-to-peer network based digital currency - daemon
+ Plcultima is a peer-to-peer electronic cash system that
+ is completely decentralized, without the need for a central server or
+ trusted parties.  Users hold the crypto keys to their own money and
+ transact directly with each other, with the help of a P2P network to
+ check for double-spending.
+ .
+ This package provides the daemon and the CLI tool
+ plcultima-cli to interact with the daemon.
+

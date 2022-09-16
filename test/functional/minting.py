@@ -69,7 +69,8 @@ class MintingTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.setup_clean_chain = False
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1'], ['-debug']]
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-maxcablock-regtest=1500',
+                            '-totalforkblock-regtest=1600']] * self.num_nodes
         self.genesis_key0 = create_key(True, GENESIS_PRIV_KEY0_BIN)
         self.virtual_cur_time_offset = 0
         self.txmap = {}
@@ -85,6 +86,19 @@ class MintingTest(BitcoinTestFramework):
         self.fund_project_key = None
         self.reward_hints = {}
 
+    def setup_chain(self):
+        name = self.options.runtestcase
+        if name:
+            testcase = get_minting_testcases()[name]
+            if testcase and 'custom_cache' in testcase:
+                custom_cache = testcase['custom_cache']
+                if custom_cache:
+                    assert_equal(type(custom_cache), str)
+                    cachedir = os.path.join(self.options.cachedir, 'more', custom_cache)
+                    if os.path.isdir(self.options.cachedir) and os.path.isdir(cachedir):
+                        self.log.debug(f'setup_chain, cachedir before: {self.options.cachedir}, now: {cachedir}')
+                        self.options.cachedir = cachedir
+        super().setup_chain()
 
     def add_options(self, parser):
         parser.add_option("--runtestcase", dest="runtestcase", action="store", help="runtestcase")
@@ -161,7 +175,6 @@ class MintingTest(BitcoinTestFramework):
 
         self.ca3_age = params['ca3_age'] if 'ca3_age' in params else 0
         self.usermoney_age = params['usermoney_age'] if 'usermoney_age' in params else 0
-        self.ben_enabled = params['ben_enabled'] if 'ben_enabled' in params else False
         self.keys_count_required = params['keys_count_required'] if params['keys_count_required'] > 0 else params['keys_count_total']
         self.keys_count_used = params['keys_count_used']
         self.multisig = params['sig_model'] == 'multisig'
@@ -169,34 +182,33 @@ class MintingTest(BitcoinTestFramework):
         self.lock_interval_max = params['lock_interval_max'] if 'lock_interval_max' in params else 3600 * 24 * 365
         self.invalid_root_cert = params['invalid_root_cert'] if 'invalid_root_cert' in params else None
         self.invalid_user_cert = params['invalid_user_cert'] if 'invalid_user_cert' in params else None
-        self.greenflag = params['greenflag'] if 'greenflag' in params else False
-        self.green_flag_in_user_cert = params['green_flag_in_user_cert'] if 'green_flag_in_user_cert' in params else False
+        self.rootcertflags = params['rootcertflags'] if 'rootcertflags' in params else 0
+        self.ca3certflags = params['ca3certflags'] if 'ca3certflags' in params else 0
         self.exp_date_offset = params['ca3_expiration_offset'] if 'ca3_expiration_offset' in params else None
         self.minting_limit = params['ca3_minting_limit'] if 'ca3_minting_limit' in params else None
         self.daily_limit = params['ca3_daily_limit'] if 'ca3_daily_limit' in params else None
-        self.free_ben_enabled = params['free_ben_enabled'] if 'free_ben_enabled' in params else False
         self.revoke_root_cert = params['revoke_root_cert'] if 'revoke_root_cert' in params else False
         self.revoke_user_cert = params['revoke_user_cert'] if 'revoke_user_cert' in params else False
         self.refill_moneybox_accepted = params['refill_moneybox_accepted'] if 'refill_moneybox_accepted' in params else True
-        self.sivler_hoof = params['sivler_hoof'] if 'sivler_hoof' in params else False
         self.separate_white = params['separate_white'] if 'separate_white' in params else False
         self.gen_block_after_cert = params['gen_block_after_cert'] if 'gen_block_after_cert' in params else True
         self.pack_tx_into_block = params['pack_tx_into_block'] if 'pack_tx_into_block' in params else False
         self.use_burn = params['use_burn'] if 'use_burn' in params else True
+        self.use_taxfree_cert = params['use_taxfree_cert'] if 'use_taxfree_cert' in params else False
 
-        assert_equal(type(self.greenflag), bool)
-        assert_equal(type(self.green_flag_in_user_cert), bool)
-        assert_equal(type(self.ben_enabled), bool)
-        assert_equal(type(self.free_ben_enabled), bool)
-        assert_equal(type(self.sivler_hoof), bool)
+        assert_equal(type(self.rootcertflags), int)
+        assert_equal(type(self.ca3certflags), int)
         assert_equal(type(params['accepted']), bool)
         assert_equal(type(self.revoke_root_cert), bool)
         assert_equal(type(self.revoke_user_cert), bool)
         assert_equal(type(self.refill_moneybox_accepted), bool)
+        assert_equal(type(self.use_burn), bool)
+        assert_equal(type(self.use_taxfree_cert), bool)
 
         assert (params['fee_user_percent'] == 'auto' or (params['fee_user_percent'] >= 0 and params['fee_user_percent'] <= 100))
         # if reward goes to ben, ben_enabled must be True:
-        assert ('ben' not in params['reward_to'] or self.ben_enabled == True)
+        ben_enabled = (self.ca3certflags & HAS_BEN_KEY)
+        assert ('ben' not in params['reward_to'] or ben_enabled)
         assert ((params['keys_count_total'] >= 1 and params['keys_count_total'] <= 15) or not self.multisig)
         assert_in(self.invalid_root_cert, [None, 1, 2, 3, 4, 5, 20, 21, 22, 23] + list(range(60,70)))
         assert_in(self.invalid_user_cert, [None, 1, 2, 3, 4, 5, 20, 21, 22, 23])
@@ -209,7 +221,7 @@ class MintingTest(BitcoinTestFramework):
             assert_in('step2_reward_to', params)
             assert_in('step2_accepted', params)
             # if reward goes to ben, ben_enabled must be True:
-            assert ('ben' not in params['step2_reward_to'] or self.ben_enabled == True)
+            assert ('ben' not in params['step2_reward_to'] or ben_enabled)
             assert_equal(type(params['step2_accepted']), bool)
         if 'step3_enabled' in params and params['step3_enabled'] == True:
             assert_equal(params['accepted'], True)  # if step3 presents, step1 must be successful
@@ -220,7 +232,7 @@ class MintingTest(BitcoinTestFramework):
             assert_in('step3_reward_to', params)
             assert_in('step3_accepted', params)
             # if reward goes to ben, ben_enabled must be True:
-            assert ('ben' not in params['step3_reward_to'] or self.ben_enabled == True)
+            assert ('ben' not in params['step3_reward_to'] or ben_enabled)
             assert_equal(type(params['step3_accepted']), bool)
 
         if 'refill_moneybox' not in params or params['refill_moneybox'] is None:
@@ -293,13 +305,15 @@ class MintingTest(BitcoinTestFramework):
     def create_key(self, key_name, cert_name = None, print_func = None):
         print_func = self.set_default_print_func_if_none(print_func)
         key = CECKey()
-        key.set_secretbytes(open("/dev/urandom","rb").read(32))
+        # key.set_secretbytes(open("/dev/urandom","rb").read(32))
+        key.set_secretbytes(hash256((key_name + str(cert_name)).encode('utf-8')))
         if not key.is_compressed():
             key.set_compressed(True)
         pubkey = key.get_pubkey()
-        print_func('Details for {} in {}: pubkey ({}): {}, pubkeyhash: {}, address: {}, priv_key: {}'.
-                   format(key_name, cert_name, len(pubkey), bytes_to_hex_str(pubkey), bytes_to_hex_str(reverse(hash160(pubkey))),
-                          AddressFromPubkey(pubkey), bytes_to_hex_str(key.get_secret())))
+        pkh = hash160(pubkey)
+        print_func('Details for {} in {}: pubkey ({}): {}, pubkeyhash: {} / {}, address: {}, priv_key: {}'.
+                   format(key_name, cert_name, len(pubkey), bytes_to_hex_str(pubkey), bytes_to_hex_str(pkh), bytes_to_hex_str(reverse(pkh)),
+                          AddressFromPubkeyHash(pkh), bytes_to_hex_str(key.get_secret())))
         return key
 
     def create_other_keys(self, count, name, cert_name = None):
@@ -308,9 +322,9 @@ class MintingTest(BitcoinTestFramework):
             other_keys.append(self.create_key(name + '_' + str(i), cert_name))
         return other_keys
 
-    def create_cert(self, utxo_coins, amount, parent_key, keys_count_total, keys_count_required, green_flag, has_device,
-                    has_ben, silver_hoof, cert_name, user_keys_to_use=None, alt_dest_pubkeyhash=None, exp_date_offset=None,
-                    minting_limit=None, daily_limit=None, free_ben_enabled=False, invalid_signature=None):
+    def create_cert(self, utxo_coins, amount, parent_key, flags, keys_count_total, keys_count_required,
+                    cert_name, user_keys_to_use=None, alt_dest_pubkeyhash=None, exp_date_offset=None,
+                    minting_limit=None, daily_limit=None, invalid_signature=None):
         bestblockhash = self.nodes[0].getbestblockhash()
         block_time = self.nodes[0].getblock(bestblockhash)['time'] + 1
 
@@ -329,23 +343,12 @@ class MintingTest(BitcoinTestFramework):
         else:
             assert_equal(len(user_keys_to_use), keys_count_total if self.multisig else 1)
             user_keys = user_keys_to_use
-        flags = 0
-        if green_flag:
-            flags |= FAST_MINTING
-        if has_device:
-            flags |= HAS_DEVICE_KEY
-        if has_ben:
-            flags |= HAS_BEN_KEY
         if exp_date_offset is not None:
             flags |= HAS_EXPIRATION_DATE
         if minting_limit is not None:
             flags |= HAS_MINTING_LIMIT
         if daily_limit is not None:
             flags |= HAS_DAILY_LIMIT
-        if free_ben_enabled:
-            flags |= FREE_BEN
-        if silver_hoof:
-            flags |= SILVER_HOOF
         if self.multisig:
             flags |= ((keys_count_total << 12) & TOTAL_PUBKEYS_COUNT_MASK)
             if keys_count_required is not None:
@@ -356,11 +359,11 @@ class MintingTest(BitcoinTestFramework):
         for user_key in user_keys:
             user_pubkeyhash = hash160(user_key.get_pubkey())
             block1.extend(user_pubkeyhash)
-        if has_device:
+        if flags & HAS_DEVICE_KEY:
             dev_key = self.create_key('dev_key', cert_name)
             dev_pubkeyhash = hash160(dev_key.get_pubkey())
             block1.extend(dev_pubkeyhash)
-        if has_ben:
+        if flags & HAS_BEN_KEY:
             ben_key = self.create_key('ben_key', cert_name)
             ben_pubkeyhash = hash160(ben_key.get_pubkey())
             block1.extend(ben_pubkeyhash)
@@ -414,13 +417,13 @@ class MintingTest(BitcoinTestFramework):
         tx2.vin[0].scriptSig = CScript([signature, parent_pubkey_bin])
         tx2.rehash()
 
-        self.log.debug('cert {}: tx2.hash: {}, flags: {} ({}), scriptPubKey ({}): {}, block1_hash: {}, parent_pubkey: {}, parent_pubkeyhash: {}, parent_privkey: {}, sig_hash: {}, signature ({}): {}, multisig: {}, amount: {}, block_time: {}, exp_date_offset: {}, minting_limit: {}, daily_limit: {}, free_ben_enabled: {}, invalid_signature: {}'.
+        self.log.debug('cert {}: tx2.hash: {}, flags: {} ({}), scriptPubKey ({}): {}, block1_hash: {}, parent_pubkey: {}, parent_pubkeyhash: {}, parent_privkey: {}, sig_hash: {}, signature ({}): {}, multisig: {}, amount: {}, block_time: {}, exp_date_offset: {}, minting_limit: {}, daily_limit: {}, invalid_signature: {}'.
               format(cert_name, tx2.hash, hex(flags), flags_to_str(flags), len(scriptOutPKH), bytes_to_hex_str(scriptOutPKH),
                      bytes_to_hex_str(reverse(block1_hash)), bytes_to_hex_str(parent_key.get_pubkey()),
                      bytes_to_hex_str(reverse(hash160(parent_key.get_pubkey()))), bytes_to_hex_str(parent_key.get_secret()),
                      bytes_to_hex_str(sig_hash), len(signature), bytes_to_hex_str(signature),
                      self.multisig, amount, block_time, exp_date_offset, minting_limit,
-                     daily_limit, free_ben_enabled, invalid_signature))
+                     daily_limit, invalid_signature))
         tx2_full = tx2.serialize()
         self.log.debug('tx2: {}'.format(node0.decoderawtransaction(bytes_to_hex_str(tx2_full))))
         self.log.debug('tx2 hex ({}): {}'.format(len(tx2_full), bytes_to_hex_str(tx2_full)))
@@ -467,7 +470,8 @@ class MintingTest(BitcoinTestFramework):
 
     def ensure_fund_keys_created(self):
         if self.fund_police_key is None:
-            self.fund_police_key = self.create_key('fund_police_key')
+            # self.fund_police_key = self.create_key('fund_police_key')
+            self.fund_police_key = self.user_keys_m[0]
         if self.fund_project_key is None:
             self.fund_project_key = self.create_key('fund_project_key')
 
@@ -762,9 +766,15 @@ class MintingTest(BitcoinTestFramework):
         rewadr_real_output_names = self.get_real_reward_outputs_names(reward_to, params)
         nLockTime = 0
         spend_inputs_with_proj_key = ()
+        spend_inputs_with_police_key = ()
         if self.step == 2 and 'step2_spend_inputs_with_proj_key' in params:
             spend_inputs_with_proj_key = params['step2_spend_inputs_with_proj_key']
             assert_equal(type(spend_inputs_with_proj_key), tuple)
+        if self.step == 2 and 'step2_spend_inputs_with_police_key' in params:
+            spend_inputs_with_police_key = params['step2_spend_inputs_with_police_key']
+            assert_equal(type(spend_inputs_with_police_key), tuple)
+        # input may be spent with project key or police one, not both:
+        assert_equal(set(spend_inputs_with_proj_key).intersection(set(spend_inputs_with_police_key)), set())
         if len(moneybox_outputs_names) == 0 or set.union(set(moneybox_outputs_names), p2sh_like_dests) != p2sh_like_dests:
             # if no moneybox outputs (first condition) or at least one output is not p2sh-like (second condition),
             # skip checks, this is non-standard transaction:
@@ -857,6 +867,11 @@ class MintingTest(BitcoinTestFramework):
                             reward_change = reward_taken - reward_to_ben
                             moneybox_inputs_enough = True
                             break
+
+                if self.use_taxfree_cert:
+                    print_to_buffer(f'tx3 vin[{len(tx3.vin)}] taxfree_input')
+                    seq = 0xfffffffe if self.locked_outputs else 0xffffffff
+                    tx3.vin.append(CTxIn(COutPoint(0, 0), GetP2SHMoneyboxScript(OP_CHECKSUPER), seq))
 
                 if not moneybox_inputs_enough:
                     moneybox_sum = sum(elem['amount'] for elem in moneybox_inputs)
@@ -1042,9 +1057,20 @@ class MintingTest(BitcoinTestFramework):
                         if i in spend_inputs_with_proj_key:
                             signature_proj = self.fund_project_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
                             tx3.vin[i].scriptSig = CScript([OP_0, signature, signature_proj, OP_2, user_key.get_pubkey(), self.fund_project_key.get_pubkey()])
-                            print_to_buffer('mint, user input {}, sig_hash ({}): {}, signature_user ({}): {}, signature_proj: {}, scriptSig ({}): {}'.format(
+                            print_to_buffer('mint, user input {}, spend_inputs_with_proj_key, sig_hash ({}): {}, signature_user ({}): {}, signature_proj: {}, scriptSig ({}): {}'.format(
                                 i, len(sig_hash), bytes_to_hex_str(reverse(sig_hash)),
                                 len(signature), bytes_to_hex_str(signature), bytes_to_hex_str(signature_proj),
+                                len(tx3.vin[i].scriptSig), bytes_to_hex_str(tx3.vin[i].scriptSig)))
+                        elif i in spend_inputs_with_police_key:
+                            self.ensure_fund_keys_created()
+                            signature_police = self.fund_police_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+                            tx3.vin[i].scriptSig = CScript([signature, user_key.get_pubkey(), 0, signature_police,
+                                                            self.fund_police_key.get_pubkey(),
+                                                            ser_uint256(utxo_cert_root.hash), utxo_cert_root.n,
+                                                            ser_uint256(utxo_cert_ca3.hash), utxo_cert_ca3.n])
+                            print_to_buffer('mint, user input {}, spend_inputs_with_police_key, sig_hash ({}): {}, signature_user ({}): {}, signature_police: {}, scriptSig ({}): {}'.format(
+                                i, len(sig_hash), bytes_to_hex_str(reverse(sig_hash)),
+                                len(signature), bytes_to_hex_str(signature), bytes_to_hex_str(signature_police),
                                 len(tx3.vin[i].scriptSig), bytes_to_hex_str(tx3.vin[i].scriptSig)))
                         else:
                             if invalid_signature == 102:
@@ -1076,7 +1102,7 @@ class MintingTest(BitcoinTestFramework):
                         tx3.vin[i].scriptSig = scriptSig
                         print_to_buffer('mint, user input {}, sig_hash ({}): {}, scriptSig ({}): {}'.format(
                             i, len(sig_hash), bytes_to_hex_str(reverse(sig_hash)), len(scriptSig), bytes_to_hex_str(scriptSig)))
-                for i in range(len(user_inputs), len(tx3.vin)):
+                for i in range(len(user_inputs), len(tx3.vin) - int(self.use_taxfree_cert)):
                     # There are no common rules of composing signature for p2sh transaction inputs,
                     # we made agreement to replace scriptSig with inner script (CScript(OP_CHECKREWARD)), not
                     # with the public key script of the referenced transaction output
@@ -1115,6 +1141,30 @@ class MintingTest(BitcoinTestFramework):
                         self.keys_count_used, signatures_and_keys_hex,
                         len(tx3.vin[i].scriptSig), bytes_to_hex_str(tx3.vin[i].scriptSig)))
 
+                if self.use_taxfree_cert:
+                    # There are no common rules of composing signature for p2sh transaction inputs,
+                    # we made agreement to replace scriptSig with inner script (CScript(OP_CHECKSUPER)), not
+                    # with the public key script of the referenced transaction output
+                    # (excluding all occurences of OP CODESEPARATOR in it), as for p2pkh transactions:
+                    scriptSig = CScript([OP_CHECKSUPER])
+                    i = len(tx3.vin) - 1
+                    (sig_hash, err) = SignatureHash(scriptSig, tx3, i, SIGHASH_ALL)
+                    assert (err is None)
+                    signatures_and_keys = []
+                    for user_key in used_user_keys_m:
+                        signature = user_key.sign(sig_hash) + bytes(bytearray([SIGHASH_ALL]))
+                        signatures_and_keys.append(signature)
+                        signatures_and_keys.append(user_key.get_pubkey())
+                    tx3.vin[i].scriptSig = CScript(signatures_and_keys +
+                                                   [ ser_uint256(utxo_cert_root.hash), utxo_cert_root.n,
+                                                     ser_uint256(utxo_cert_ca3.hash), utxo_cert_ca3.n,
+                                                     CScript([OP_CHECKSUPER])])
+                    signatures_and_keys_hex = [bytes_to_hex_str(item) for item in signatures_and_keys]
+                    print_to_buffer('mint, taxfree input {}, sig_hash ({}): {}, keys_count_used: {}, signatures_and_keys: {}, scriptSig ({}): {}'.format(
+                        i, len(sig_hash), bytes_to_hex_str(reverse(sig_hash)),
+                        self.keys_count_used, signatures_and_keys_hex,
+                        len(tx3.vin[i].scriptSig), bytes_to_hex_str(tx3.vin[i].scriptSig)))
+
                 user_bytes_real = self.get_bytes_in_tx_inputs(tx3, 0, len(user_inputs))
                 moneybox_bytes_real = self.get_bytes_in_tx_inputs(tx3, len(user_inputs), len(tx3.vin) - len(user_inputs))
                 if user_bytes_real == user_inputs_lens_sum and moneybox_bytes_real == moneybox_inputs_lens_sum:
@@ -1147,6 +1197,9 @@ class MintingTest(BitcoinTestFramework):
         # Store information about locked_outputs to be used on the next step:
         self.locked_outputs = any(('locked' in fragment) for fragment in user_outputs_names)
 
+        if 'step2_ignore_locked_outputs' in params and params['step2_ignore_locked_outputs']:
+            self.locked_outputs = False
+
         tx3.rehash()
         self.log.debug('tx3.hash: {}, multisig_script ({}): {}'.format(tx3.hash, len(multisig_script), bytes_to_hex_str(multisig_script)))
 
@@ -1166,6 +1219,7 @@ class MintingTest(BitcoinTestFramework):
 
         self.test_node.send_message(tx_message)
         self.test_node.sync_with_ping()
+        print_tx_verbose(node0, tx_hex=bytes_to_hex_str(tx_message_bytes), skip_parents=True, comment=f'tx3_verbose_step_{self.step}')
 
         if self.test_node.reject_message is not None:
             self.log.info('got reject message: {}'.format(self.test_node.reject_message))
@@ -1377,7 +1431,7 @@ class MintingTest(BitcoinTestFramework):
             (utxo_coins_root, _) = self.pay_to_address(AddressFromPubkey(self.genesis_key0.get_pubkey()),
                                                        rootcertamount + burn + fee)
             (ca3_keys, _, _, utxo_cert_root, _) = self.create_cert(utxo_coins_root, rootcertamount,
-                                                                   self.genesis_key0, 1, 1, self.greenflag, False, False, False,
+                                                                   self.genesis_key0, self.rootcertflags, 1, 1,
                                                                    'fake_root_cert', alt_dest_pubkeyhash = hash160(away_key.get_pubkey()))
             assert_equal(len(ca3_keys), 1)
             ca3_key = ca3_keys[0]
@@ -1392,8 +1446,8 @@ class MintingTest(BitcoinTestFramework):
                                                        rootcertamount + burn + fee,
                                                        self.gen_block_after_cert)
             (ca3_keys, _, _, utxo_cert_root, _) = self.create_cert(utxo_coins_root, rootcertamount,
-                                                                   fake_genezis_key, 1, 1, self.greenflag, False,
-                                                                   False, False, 'fake_root_cert')
+                                                                   fake_genezis_key, self.rootcertflags, 1, 1,
+                                                                   'fake_root_cert')
             assert_equal(len(ca3_keys), 1)
             ca3_key = ca3_keys[0]
         elif self.invalid_root_cert in list(range(60,70)):
@@ -1407,8 +1461,8 @@ class MintingTest(BitcoinTestFramework):
                                                        rootcertamount + burn + fee,
                                                        self.gen_block_after_cert)
             (ca3_keys, _, _, utxo_cert_root, _) = self.create_cert(utxo_coins_root, rootcertamount,
-                                                                   genezis_key1, 1, 1, self.greenflag, False,
-                                                                   False, False, 'root_cert')
+                                                                   genezis_key1, self.rootcertflags, 1, 1,
+                                                                   'root_cert')
             assert_equal(len(ca3_keys), 1)
             ca3_key = ca3_keys[0]
         elif self.invalid_root_cert in [20, 21, 22, 23]:
@@ -1433,8 +1487,8 @@ class MintingTest(BitcoinTestFramework):
 
         # Скрипт переводит с адреса ROOT_PKH на этот же адрес некоторую сумму, например 1 PLCU, активируя CA3_PKH ключ.
         (ca3_keys, _, _, utxo_cert_root, _) = self.create_cert(utxo_coins_root, rootcertamount,
-                                                               self.genesis_key0,
-                                                               1, 1, self.greenflag, False, False, False, 'root_cert',
+                                                               self.genesis_key0, self.rootcertflags,
+                                                               1, 1, 'root_cert',
                                                                invalid_signature=invalid_signature)
         assert_equal(len(ca3_keys), 1)
         ca3_key = ca3_keys[0]
@@ -1458,7 +1512,7 @@ class MintingTest(BitcoinTestFramework):
                                                        rootcertamount + burn + fee,
                                                        self.gen_block_after_cert)
             (_, _, _, utxo_cert_root, _) = self.create_cert(utxo_coins_root, rootcertamount, self.genesis_key0,
-                                                                  1, 1, self.greenflag, False, False, False, 'root_cert_2')
+                                                            self.rootcertflags, 1, 1, 'root_cert_2')
             self.log.debug('update_root_certificate, invalid_root_cert: {}, utxo_cert_root: {}'.format(self.invalid_root_cert, utxo_cert_root))
 
         return utxo_cert_root
@@ -1492,14 +1546,11 @@ class MintingTest(BitcoinTestFramework):
                                                       ca3certamount + burn + fee,
                                                       self.gen_block_after_cert)
             (user_keys, _, ben_key, utxo_cert_ca3, time_ca3) = self.create_cert(utxo_coins_ca3, ca3certamount,
-                                                                                ca3_key, params['keys_count_total'], self.keys_count_required,
-                                                                                self.green_flag_in_user_cert, True,
-                                                                                self.ben_enabled, self.sivler_hoof,
+                                                                                ca3_key, self.ca3certflags, params['keys_count_total'], self.keys_count_required,
                                                                                 'fake_ca3_cert', user_keys_to_use,
                                                                                 exp_date_offset=self.exp_date_offset,
                                                                                 minting_limit=self.minting_limit,
                                                                                 daily_limit=self.daily_limit,
-                                                                                free_ben_enabled=self.free_ben_enabled,
                                                                                 alt_dest_pubkeyhash=hash160(away_key.get_pubkey()))
         elif self.invalid_user_cert == 4:
             # will be processed in update_user_certificate() later
@@ -1539,14 +1590,12 @@ class MintingTest(BitcoinTestFramework):
 
         # Скрипт переводит с адреса CA3_PKH на этот же адрес некоторую сумму, например 10 mPLC, активируя User_PKH ключи.
         (user_keys, _, ben_key, utxo_cert_ca3, time_ca3) = self.create_cert(utxo_coins_ca3, ca3certamount,
-                                                                            ca3_key, params['keys_count_total'], self.keys_count_required,
-                                                                            self.green_flag_in_user_cert, True,
-                                                                            self.ben_enabled, self.sivler_hoof, 'ca3_cert',
-                                                                            user_keys_to_use,
+                                                                            ca3_key, self.ca3certflags,
+                                                                            params['keys_count_total'], self.keys_count_required,
+                                                                            'ca3_cert', user_keys_to_use,
                                                                             exp_date_offset=self.exp_date_offset,
                                                                             minting_limit=self.minting_limit,
                                                                             daily_limit=self.daily_limit,
-                                                                            free_ben_enabled=self.free_ben_enabled,
                                                                             invalid_signature=invalid_signature)
         assert_equal(len(user_keys), params['keys_count_total'] if self.multisig else 1)
         if self.separate_white:
@@ -1570,14 +1619,12 @@ class MintingTest(BitcoinTestFramework):
             (utxo_coins_ca3, _) = self.pay_to_address(AddressFromPubkey(ca3_key.get_pubkey()),
                                                       ca3certamount + burn + fee,
                                                       self.gen_block_after_cert)
-            (_, _, _, utxo_cert_ca3, time_ca3) = self.create_cert(utxo_coins_ca3, ca3certamount, ca3_key,
+            (_, _, _, utxo_cert_ca3, time_ca3) = self.create_cert(utxo_coins_ca3, ca3certamount, ca3_key, self.ca3certflags,
                                                                   params['keys_count_total'], self.keys_count_required,
-                                                                  self.green_flag_in_user_cert, True,
-                                                                  self.ben_enabled, self.sivler_hoof, 'ca3_cert_2',
+                                                                  'ca3_cert_2',
                                                                   exp_date_offset=self.exp_date_offset,
                                                                   minting_limit=self.minting_limit,
-                                                                  daily_limit=self.daily_limit,
-                                                                  free_ben_enabled=self.free_ben_enabled)
+                                                                  daily_limit=self.daily_limit)
             self.log.debug('update_user_certificate: invalid_user_cert: {}, utxo_cert_ca3: {}'.format(self.invalid_user_cert, utxo_cert_ca3))
         if self.invalid_user_cert == 5:
             # invalid user coins (not mentioned in CA3 certificate), but valid user keys for signing moneybox outputs in minting tx
@@ -1586,13 +1633,12 @@ class MintingTest(BitcoinTestFramework):
                                                       ca3certamount + burn + fee,
                                                       self.gen_block_after_cert)
             (self.user_keys_m, _, self.ben_key, utxo_cert_ca3, time_ca3) = self.create_cert(utxo_coins_ca3, ca3certamount,
-                                                                                            ca3_key, params['keys_count_total'], self.keys_count_required,
-                                                                                            self.green_flag_in_user_cert, True,
-                                                                                            self.ben_enabled, self.sivler_hoof, 'ca3_cert_m',
+                                                                                            ca3_key, self.ca3certflags,
+                                                                                            params['keys_count_total'], self.keys_count_required,
+                                                                                            'ca3_cert_m',
                                                                                             exp_date_offset=self.exp_date_offset,
                                                                                             minting_limit=self.minting_limit,
-                                                                                            daily_limit=self.daily_limit,
-                                                                                            free_ben_enabled=self.free_ben_enabled)
+                                                                                            daily_limit=self.daily_limit)
             self.log.debug('update_user_certificate: invalid_user_cert: {}, utxo_cert_ca3: {}'.format(self.invalid_user_cert, utxo_cert_ca3))
 
         return (utxo_cert_ca3, time_ca3)
@@ -1760,9 +1806,11 @@ class MintingTest(BitcoinTestFramework):
         if 'blockchain_height' in params:
             blockchain_height = params['blockchain_height']
             current_height = node0.getblockcount()
-            self.log.debug('required blockchain_height: {}, current_height: {}'.format(blockchain_height, current_height))
+            self.log.debug(f'required blockchain_height: {blockchain_height}, current_height: {current_height}')
             if current_height < blockchain_height:
-                generate_many_blocks(node0, blockchain_height - current_height)
+                blocks_to_gen = blockchain_height - current_height
+                assert_greater_than(100, blocks_to_gen)  # if failed here, use custom cache, 'custom_cache' parameter
+                generate_many_blocks(node0, blocks_to_gen)
                 self.test_node.sync_with_ping()
                 self.sync_all()
 
@@ -1832,7 +1880,7 @@ class MintingTest(BitcoinTestFramework):
 
         # step8
         # Скрипт начисляет проценты на положенную сумму из копилки, соблюдая гранулярность аутпутов из копилки,
-        # в соответствии с флагом greenFlag, возрастом user-сертификата, возрастом пользовательских денег
+        # в соответствии с флагом FAST_MINTING (greenFlag), возрастом user-сертификата, возрастом пользовательских денег
         # на адресе User_PKH, на которые начисляются проценты, и процентной ставкой из user-сертификата
         (mint_txid, mint_user_outputs_indexes, spent, reward_payed) = self.mint(user_outputs, utxo_cert_root, utxo_cert_ca3,
                                                                                 params, take_moneybox_inputs_from_cache=True)
@@ -2072,7 +2120,8 @@ class MintingTest(BitcoinTestFramework):
     def run_test(self):
         name = self.options.runtestcase
         if name is None:
-            # minting.py without parameters - ignore it
+            # minting.py without parameters: create cache with moneybox inputs and return:
+            self.moneybox_inputs_from_cache()
             return
         testcase = get_minting_testcases()[name]
         assert (testcase is not None)

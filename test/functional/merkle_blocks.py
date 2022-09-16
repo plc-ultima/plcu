@@ -36,7 +36,7 @@ class MerkleBlockTest(BitcoinTestFramework):
         assert_equal(self.nodes[2].getbalance(), 0)
 
         node0utxos = self.nodes[0].listunspent(1)
-        fee = Decimal('0.01')
+        fee = Decimal('0.00001000')
         (burn1, burn2, restA) = BurnedAndChangeAmount(BASE_CB_AMOUNT - fee)
         tx1 = self.nodes[0].createrawtransaction([node0utxos[0]], {self.nodes[1].getnewaddress(): restA, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
         txid1 = self.nodes[0].sendrawtransaction(self.nodes[0].signrawtransaction(tx1)["hex"])

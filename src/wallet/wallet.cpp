@@ -204,12 +204,12 @@ bool loadCertFromFile(const std::string & argName,
         certs.emplace_back(cert);
     }
 
-    if (!pubkeys.empty() && !certs.empty())
+    if (pubkeys.empty() || certs.empty())
     {
-        return true;
+        return false;
     }
 
-    return false;
+    return true;
 }
 
 //******************************************************************************
@@ -231,11 +231,19 @@ void CWallet::SetNull()
     fAbortRescan           = false;
     fScanningWallet        = false;
 
+    reloadCerts();
+}
+
+//******************************************************************************
+//******************************************************************************
+void CWallet::reloadCerts()
+{
     std::string fileName;
     std::vector<std::vector<unsigned char> > pubkeys;
     std::vector<plc::Certificate> certs;
     if (!loadCertFromFile("-taxfreecert", pubkeys, certs, fileName))
     {
+        resetCert();
         LogPrintStr("Cert not loaded - " + fileName + "\n");
     }
     else
@@ -2904,6 +2912,8 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
         graveAmounts[p.first] = 0;
     }
 
+    reloadCerts();
+
     bool is_taxFree     = hasTaxFreeCert();
     bool is_sendToSelf  = false;
 
@@ -3029,18 +3039,6 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
             needSelectAgain = false;
         }
 
-        if (Params().NetworkIDString() == CBaseChainParams::REGTEST)
-        {
-            // additional logs for debug
-            LogPrintf("CreateTransaction: Iteration:%d Amount:%d Needed:%d Selected:%d Fee:%d Burned:%d\n",
-                      iterations, sendAmount, neededAmount, selectedAmount, feeAmount, burnedAmount);
-            LogPrintf("Selected coins:\n");
-            for (const CInputCoin & ic : setCoins)
-            {
-                LogPrintf("    %s:%d amount &d", ic.outpoint.hash.ToString(), ic.outpoint.n, ic.txout.nValue);
-            }
-        }
-
         // if change not returned to address from input set -
         // set transferAmount and recalc burnedAmount, neededAmount
         // or if fee paid by the receiver
@@ -3060,6 +3058,8 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
         neededAmount   = sendAmount + (nSubtractFeeFromAmount == 0 ? (feeAmount + burnedAmount) : 0);
         if (neededAmount > selectedAmount)
         {
+            // request new subset, need to recalc fee
+            feeAmount = 0;
             needSelectAgain = true;
             continue;
         }
@@ -3269,9 +3269,9 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient> & vecSendIn,
                 return false;
             }
 
-            if (feeAmount != feeNeeded)
+            if (feeAmount < feeNeeded)
             {
-                // recalc tx if no fee substracted
+                // recalc
                 feeAmount = feeNeeded;
                 continue;
             }

@@ -7,6 +7,8 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 
 
+FEE = Decimal('0.00002000')
+
 class WalletTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 4
@@ -239,7 +241,7 @@ class WalletTest(BitcoinTestFramework):
         #4. check if recipient (node0) can list the zero value tx
         usp = node_listunspent(self.nodes[1], minimumAmount=BASE_CB_AMOUNT)
         inputs = [{"txid":usp[0]['txid'], "vout":usp[0]['vout']}]
-        (burn1, burn2, rest) = BurnedAndChangeAmount(BASE_CB_AMOUNT - Decimal('0.002'))
+        (burn1, burn2, rest) = BurnedAndChangeAmount(BASE_CB_AMOUNT - FEE)
         outputs = {self.nodes[1].getnewaddress(): rest, self.nodes[0].getnewaddress(): 11.11, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2}
 
         rawTx = self.nodes[1].createrawtransaction(inputs, outputs).replace("c0833842", "00000000") #replace 11.11 with 0.0 (int32)
@@ -429,8 +431,8 @@ class WalletTest(BitcoinTestFramework):
         # Split into two chains
         (burn1, burn2, rest) = BurnedAndChangeAmount(node0_balance)
         rawtx = self.nodes[0].createrawtransaction([{"txid": singletxid, "vout": 0}], {
-            chain_addrs[0]: rest / 2 - Decimal('0.01'),
-            chain_addrs[1]: rest / 2 - Decimal('0.01'),
+            chain_addrs[0]: rest / 2 - FEE / 2,
+            chain_addrs[1]: rest / 2 - FEE / 2,
             GRAVE_ADDRESS_1: burn1,
             GRAVE_ADDRESS_2: burn2,
         })
