@@ -145,7 +145,7 @@ BASE_SCRIPTS= [
     'free_tx.py',
     'miami_police.py',
     'minting.py',
-    'minting.py --mintalltestcases',
+    # 'minting.py --mintalltestcases',
 ]
 
 EXTENDED_SCRIPTS = [
@@ -406,12 +406,12 @@ def run_tests(test_list, src_dir, build_dir, exeext, junitoutput, tmpdir, jobs=1
         print(f'[{datetime.datetime.now().time()}] Creating normal cache...')
         subprocess.check_output([PYTHON_BIN, tests_dir + 'create_cache.py'] + flags + ["--tmpdir=%s/cache" % tmpdir])
 
-        print(f'[{datetime.datetime.now().time()}] Creating minting moneybox_inputs cache...')
-        subprocess.check_output([PYTHON_BIN, tests_dir + 'minting.py'] + flags + ["--tmpdir=%s/cache" % tmpdir])
+        # print(f'[{datetime.datetime.now().time()}] Creating minting moneybox_inputs cache...')
+        # subprocess.check_output([PYTHON_BIN, tests_dir + 'minting.py'] + flags + ["--tmpdir=%s/cache" % tmpdir])
         cache_dir_minting = os.path.join(cache_dir, 'minting')
 
         parent_cache_dir = cache_dir
-        for value in [400, 500, 1300, 1400, 1500]:
+        for value in []: #[400, 500, 1300, 1400, 1500]:
             print(f'[{datetime.datetime.now().time()}] Creating cache with {value} blocks...')
             this_cache_dir = os.path.join(cache_dir, 'more', f'cache_{value}')
             replace_flag(flags, 'cachedir', this_cache_dir)

@@ -313,7 +313,8 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
             }
         }
 
-        if (totalAmount == 0)
+        // not needed for first block
+        if (totalAmount == 0 && nHeight > 1)
         {
             if (g_totalAmount == 0 && !g_totalCalcStarted && !g_totalCalcFinished)
             {
@@ -356,7 +357,8 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
     // add refill and subsidy if emission
     if (is_totalNg)
     {
-        if (totalAmount > 0)
+        // for first block total is 0
+        if (totalAmount > 0 || nHeight == 1)
         {
             totalAmount += nRefill;
             if (subsidy.second)
@@ -371,7 +373,6 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript & s
     coinbaseTx.vin[0].prevout.SetNull();
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
 
-    if (is_totalNg)
     {
         uint32_t idx = coinbaseTx.vin.size();
         coinbaseTx.vin.resize(idx+1);

@@ -113,10 +113,10 @@ BOOST_AUTO_TEST_CASE(rpc_rawsign)
       "\"vout\":1,\"scriptPubKey\":\"a9146622b5f7a8be47e55ea87a191d75d52d0b7c1b7c87\","
       "\"redeemScript\":\"5121037048842c6143496fb88d29c2272c4ad333ffbd1f9572c145cb3f01ef9e309d092103b9c6e738c93950eb3568a627cf528ee062cc4f4514bf1baa56ad2bcdabcd822652ae\"}]";
     r = CallRPC(std::string("createrawtransaction ")+prevout+" "+
-      "{\"U2xH4gyzE4iKkhbL24wnajxKqB2ipj9mgmifw\":11}");
+      "{\"U1xPcY2EAxn2UEqTQi7ZyWg9e4h7kxKgT3M1P\":11}");
     std::string notsigned = r.get_str();
-    std::string privkey1 = "\"AwRnYwLinmMKz977iXSLGLNUjXs319LdpZFc8auNnpXNjhNfM5sBmRy\"";
-    std::string privkey2 = "\"AwRnW4e73pwcoJQRCT85N3sYgPs2KHKV7mCdGB5fp9sN1hQFwcZsthB\"";
+    std::string privkey1 = "\"Aw4UuZNujsF1uRedHu2sMLqcwJYDe1UYMc5pzCCQSqiyjT7iNXJZ7WW\"";
+    std::string privkey2 = "\"Aw4UrggHzvqJiawvmpicT4LgtAYCx9TPep2r7nNhUB4y1T9Jy3T4erE\"";
     r = CallRPC(std::string("signrawtransaction ")+notsigned+" "+prevout+" "+"[]");
     BOOST_CHECK(find_value(r.get_obj(), "complete").get_bool() == false);
     r = CallRPC(std::string("signrawtransaction ")+notsigned+" "+prevout+" "+"["+privkey1+","+privkey2+"]");

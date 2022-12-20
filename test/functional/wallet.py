@@ -137,7 +137,7 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(len(node0utxos), 2)
 
         # create both transactions
-        HIGH_FEE = Decimal('0.002')
+        HIGH_FEE = Decimal('0.00002000')
         txns_to_send = []
         for utxo in node0utxos:
             inputs = []

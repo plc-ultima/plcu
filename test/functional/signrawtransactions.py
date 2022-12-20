@@ -11,9 +11,7 @@ from test_framework.script import *
 
 
 def scriptPubKeyHexForSecret(secret):
-    key = CECKey()
-    key.set_secretbytes(hex_str_to_bytes(secret))
-    key.set_compressed(True)
+    key = create_key(True, hex_str_to_bytes(secret))
     return bytes_to_hex_str(GetP2PKHScript(hash160(key.get_pubkey())))
 
 
@@ -29,8 +27,8 @@ class SignRawTransactionsTest(BitcoinTestFramework):
 
         1) The transaction has a complete set of signatures
         2) No script verification error occurred"""
-        privKeys = ['AwSa5beJfAQFnX8pK4rMJvxcnGsvioLw6UobCPgPvFLsyoDSRwUue5z', 'AwSa53S4TqqVghsKaALZ3W4AMsG9a5qWWtuQ1WCk7Rmd6a2xvkRgMQ1']
-        secrets = ['72b12fd1d01ff094544466fe41856a2ec21b38e2eb3d57f8af1e3a6427bf76d1', '621f1bca43fa20752612dd3250ad3265082d7f461a9ae749b6544c30f0745d40']
+        privKeys = ['AwTDyCfw68xBDHX61gZ46e1LqdWuoNsc5GKEmYNPaEkGaiEoB2hpvzn', 'AwTE27XyFdZnErWPg8KjBSYVyWYyirFaKX6omPKqNQ84STYbysSN627']
+        secrets = ['9578e3841d8bb3c6aa8f8b98266a715f344d79d0397f04ce90b6c76518297b9b', 'ec5772d57480ca064a75a4628f328d1d53ea39989ab70c8a2c78b14636053cbc']
 
         inputs = [
             # Valid pay-to-pubkey scripts
@@ -40,7 +38,7 @@ class SignRawTransactionsTest(BitcoinTestFramework):
              'scriptPubKey': scriptPubKeyHexForSecret(secrets[1])},
         ]
 
-        outputs = {'U2xFhgz9URQx5HEqXTr6ytHhCpRWTBjzvdGpm': 0.1}
+        outputs = {AddressFromPubkeyHash(hash160(b'hello')): 0.1}
 
         rawTx = self.nodes[0].createrawtransaction(inputs, outputs)
         rawTxSigned = self.nodes[0].signrawtransaction(rawTx, inputs, privKeys)
@@ -61,8 +59,8 @@ class SignRawTransactionsTest(BitcoinTestFramework):
         4) Two script verification errors occurred
         5) Script verification errors have certain properties ("txid", "vout", "scriptSig", "sequence", "error")
         6) The verification errors refer to the invalid (vin 1) and missing input (vin 2)"""
-        privKeys = ['AwSa5beJfAQFnX8pK4rMJvxcnGsvioLw6UobCPgPvFLsyoDSRwUue5z']
-        secrets = ['72b12fd1d01ff094544466fe41856a2ec21b38e2eb3d57f8af1e3a6427bf76d1']
+        privKeys = ['AwTDyCfw68xBDHX61gZ46e1LqdWuoNsc5GKEmYNPaEkGaiEoB2hpvzn']
+        secrets = ['9578e3841d8bb3c6aa8f8b98266a715f344d79d0397f04ce90b6c76518297b9b']
 
         inputs = [
             # Valid pay-to-pubkey script
@@ -82,7 +80,7 @@ class SignRawTransactionsTest(BitcoinTestFramework):
              'scriptPubKey': 'badbadbadbad'}
         ]
 
-        outputs = {'U2xFhgz9URQx5HEqXTr6ytHhCpRWTBjzvdGpm': 0.1}
+        outputs = {AddressFromPubkeyHash(hash160(b'hello-hello')): 0.1}
 
         rawTx = self.nodes[0].createrawtransaction(inputs, outputs)
 

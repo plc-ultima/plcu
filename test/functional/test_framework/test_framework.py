@@ -332,8 +332,8 @@ class BitcoinTestFramework(object):
     def enable_mocktime(self):
         # For backwared compatibility of the python scripts
         # with previous versions of the cache, set MOCKTIME
-        # to Oct 23, 2021 + (201 * 90)
-        self.mocktime = 1634970332 + (201 * 90)
+        # to Nov 22, 2022 + (201 * 90)
+        self.mocktime = 1669107600 + (201 * 90)
 
     def disable_mocktime(self):
         self.mocktime = 0

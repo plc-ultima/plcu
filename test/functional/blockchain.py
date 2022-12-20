@@ -56,10 +56,10 @@ class BlockchainTest(BitcoinTestFramework):
     def _test_gettxoutsetinfo(self):
         node = self.nodes[0]
         res = node.gettxoutsetinfo()
-        assert_equal(res['total_amount'], BASE_CB_AMOUNT * 100 + 100 * 10 * 100 + Decimal('0.005') * 100)
+        assert_equal(res['total_amount'], BASE_CB_AMOUNT * 100 + MONEYBOX_GRANULARITY * 10 * 100 + CB_AMOUNT_AFTER_BLOCK_100 * 100)
         assert_equal(res['transactions'], 200)
         assert_equal(res['height'], 200)
-        assert_equal(res['txouts'], 11*100 + 100)
+        assert_equal(res['txouts'], (11 if MONEYBOX_GRANULARITY else 1) * 100 + 100)
         # assert_equal(res['bogosize'], 17000),
         assert_equal(res['bestblock'], node.getblockhash(200))
         size = res['disk_size']

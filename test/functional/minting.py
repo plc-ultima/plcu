@@ -2118,6 +2118,8 @@ class MintingTest(BitcoinTestFramework):
 
 
     def run_test(self):
+        if not MONEYBOX_GRANULARITY:
+            raise SkipTest('no moneybox - no minting')
         name = self.options.runtestcase
         if name is None:
             # minting.py without parameters: create cache with moneybox inputs and return:

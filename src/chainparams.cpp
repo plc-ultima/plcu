@@ -91,7 +91,9 @@ CScript makeMoneyBoxScriptPubKey()
 
 CScript makeGraveScriptPubKey(const std::string & graveAddress, const CChainParams & params)
 {
-    return GetScriptForDestination(CBitcoinAddress(graveAddress).Get(params));
+    CBitcoinAddress grave(graveAddress);
+    assert(grave.IsValid(params) && "invalid destination");
+    return GetScriptForDestination(grave.Get(params));
 }
 
 CScript makeMausoleumScriptPubKey()
@@ -109,14 +111,14 @@ public:
     CMainParams() {
         strNetworkID = "main";
 
-        base58Prefixes[PUBKEY_ADDRESS] = boost::assign::list_of(0xC8)(0x05)(0x28).convert_to_container<std::vector<unsigned char> >();
-        base58Prefixes[SCRIPT_ADDRESS] = boost::assign::list_of(0xC8)(0x05)(0x29).convert_to_container<std::vector<unsigned char> >();
-        base58Prefixes[SECRET_KEY]     = boost::assign::list_of(0xC8)(0x04)(0xAA).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[PUBKEY_ADDRESS] = boost::assign::list_of(0xC7)(0xE4)(0x90).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[SCRIPT_ADDRESS] = boost::assign::list_of(0xC7)(0xE4)(0xCD).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[SECRET_KEY]     = boost::assign::list_of(0xC7)(0xE4)(0x09).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_PUBLIC_KEY] = boost::assign::list_of(0x04)(0x88)(0xB2)(0x1E).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_SECRET_KEY] = boost::assign::list_of(0x04)(0x88)(0xAD)(0xE4).convert_to_container<std::vector<unsigned char> >();
 
         consensus.BIP34Height                    = 1;
-        consensus.BIP34Hash                      = uint256S("da1679b38daa52ffb878f3b3d7a20726a9de21ed937f71410b711278ddb3fa7a");
+        consensus.BIP34Hash                      = uint256S("0x00");
         consensus.BIP65Height                    = 1;
         consensus.BIP66Height                    = 1;
         consensus.powLimit                       = uint256S("007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -146,35 +148,34 @@ public:
         consensus.nMinimumChainWork = uint256S("0x00");
 
         // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256S("0x1673fa904a93848eca83d5ca82c7af974511a7e640e22edc2976420744f2e56a"); //1155631
+        consensus.defaultAssumeValid = uint256S("0x00");
 
         consensus.countOfInitialAmountBlocks = 100;
-        consensus.countOfInitialAwardBlocks  = 100;
+        consensus.countOfInitialAwardBlocks  = 0;
         consensus.minGranularity             = 10*COIN;
         consensus.granularities              = std::vector<std::pair<uint32_t, int64_t> >(
                                                 {{0, 100*COIN}});
 
         consensus.moneyBoxAddress = makeMoneyBoxScriptPubKey();
-        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho", *this), 0.02),
+        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U1xPtGsuNviccXWGkTbERTxVAUd8RWtJ6243a", *this), 0.02),
                                      std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
 
         consensus.maxCaBlock                 = 100000;
-        consensus.defaultFeeReductionBlock   = 35000;
         consensus.maxTotalAmount             = 11000000 * COIN;
 
-        consensus.startTotalNgBlock          = 237237;
+        consensus.startTotalNgBlock          = 1;
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
          * The characters are rarely used upper ASCII, not valid as UTF-8, and produce
          * a large 32-bit integer with any alignment.
          */
-        pchMessageStart[0] = 0xfc;
-        pchMessageStart[1] = 0xdf;
-        pchMessageStart[2] = 0xb7;
-        pchMessageStart[3] = 0xda;
+        pchMessageStart[0] = 0xfb;
+        pchMessageStart[1] = 0xe0;
+        pchMessageStart[2] = 0xb6;
+        pchMessageStart[3] = 0xd9;
 
-        nDefaultPort       = 9835;
+        nDefaultPort       = 7392;
         nPruneAfterHeight  = 100000;
 
         // Note that of those with the service bits flag, most only support a subset of possible options
@@ -203,23 +204,38 @@ public:
 
     void init()
     {
-        const char * pszTimestamp = "01/Now/2021 The Time Is Now!\n"
-                                    "BTC 707690  0000000000000000000c753df2aad84ec832c09b20b00cc9e526ac917367d73a\n"
-                                    "LTC 2150310 eaa22f638167d45b4d4388cf566482cd16ee3d98fc3d598364a1ab0da7653771";
+        const char * pszTimestamp = "22/Now/2022 The Time For UU!\n"
+                                    "BTC 764390  00000000000000000006f25cddd1173f4e9148ddd2c62a07dcbf2946f0523e63\n"
+                                    "LTC 2374080 b3b6e087344d4bd0299e263da7cc233be70722637413613409234226294bd043";
 
         std::vector<CScript> scripts(10);
-        // U2xHL8a4MGe47f1gwxXmvVwDeN6iW5c2n924J
-        scripts[0] << OP_RETURN << ParseHex("02643893c9834e7620908bfbefef8a7c0ab54a3cbe140e6757d0b1959dea7d0f28");
-        // U2xHHMWh65QX56FQBfKC7uPiRPstnGNzjZtgR
-        scripts[1] << OP_RETURN << ParseHex("02505688ad32ea6245b621101c52816c9df7ea6de15e18bdf31356fe1bece15199");
-        // U2xHDfg6KshZKDbc1h3z2Zgf5P2yzTXWC8Dbb
-        scripts[2] << OP_RETURN << ParseHex("0225142b65627c64f2cb8791598be62bc1d6d9ee77eeff89ef62406f15e562a48f");
 
-        genesis = CreateGenesisBlock(pszTimestamp, scripts, 1635714000, 0x3e9, 0x1f7fffff, 1, 1 * COIN, consensus);
+        // U1xPosjUAZmjZus2DuB3eY55K14usv9R5Qkge
+        scripts[0] << OP_RETURN << ParseHex("0274286b0c7881b69fdc0b85ac4e2b286f154c5b9247dd6bd695980925a68a6c87");
+        // U1xPgtCR8nTVwCUQB3nCTGyAoo9sQ73ghHnWN
+        scripts[1] << OP_RETURN << ParseHex("03186fdf4218fde69bf46fc4f8d15ba0964dde8dab37039d7b790f0aaa62aa5e3b");
+        // U1xPjxE4Rrqg57WwMTLQpV7hLw8KEyeBJm4m6
+        scripts[2] << OP_RETURN << ParseHex("02f56946f2b33f2a08c27fc04ab3a4ddca768b1923d67af6796e21f9aa80d1c26b");
+        // U1xPoaqNU8RcxVwHcnCTNY5QVGRqHkudZCSHk
+        scripts[3] << OP_RETURN << ParseHex("0284f3dd09d5887fe13e14d58ab08e126a771b57923a3ed1435c39e61d1fa3a1e2");
+        // U1xPhi9Gre269RrbHYZZKwKxcdZHcCFSkd4je
+        scripts[4] << OP_RETURN << ParseHex("0267d94f18ba8f41a96768b77621d8af5113aea02554fec95a985a6e566980c611");
+        // U1xPmiq7XrHH1gKxri5TxgYL1HowaYcLavCWx
+        scripts[5] << OP_RETURN << ParseHex("02461c6a4778ecd3e180981da5a22d1c4c922976952acf8eec7644e0f5d8097491");
+        // U1xPzM7RXFfKZMuYjEsir5iwmBRR9PTBCemhD
+        scripts[6] << OP_RETURN << ParseHex("02ade43d9cf9b2d0a406aff1e3205317c9121f95e58bd1ed7cd6eaabf9de989ee0");
+        // U1xPsuvRZsKrQDDw7XV6wX1wvgg2ekX5GNyeJ
+        scripts[7] << OP_RETURN << ParseHex("02959f6cb7ef30833e8d015a69bf259eeb883e33a872d8758d7eeb78fd2f174b62");
+        // U1xPgDk9WfaPiU8sHXJ7JS2dhvu5xbfo18Zy7
+        scripts[8] << OP_RETURN << ParseHex("029c93b7f01a68dab13afa013a57e1032b9b6569cb0c187385a8e3bc48be18f748");
+        // U1xPnAqbMVBWVw3RvC82KeTBmRXCoasdiLinz
+        scripts[9] << OP_RETURN << ParseHex("02dfff4bc05b9193e3b8820d382122c1668b9078985e76459d7599c6732a5d97ea");
+
+        genesis = CreateGenesisBlock(pszTimestamp, scripts, 1669075200, 0x512, 0x1f7fffff, 1, 1 * COIN, consensus);
         consensus.hashGenesisBlock = genesis.GetHash();
 
-        assert(consensus.hashGenesisBlock == uint256S("f596cf825f5833b7e30243d12c6164bd26db5fba05af08c498c886ff843158dd"));
-        assert(genesis.hashMerkleRoot == uint256S("de31cc9e239f0d567443d3dec49cd21770681f98cfff34441a55e331626d1dac"));
+        assert(consensus.hashGenesisBlock == uint256S("66e86dc1473d0a0cc993323660d86161786c97fa3424656845798245b8e59003"));
+        assert(genesis.hashMerkleRoot == uint256S("4803a73a12f8a140a1e9613c3fc818f27e69af75e466528b2e81acf3d396f231"));
     }
 };
 
@@ -231,14 +247,14 @@ public:
     CTestNetParams() {
         strNetworkID = "test";
 
-        base58Prefixes[PUBKEY_ADDRESS] = boost::assign::list_of(0xC8)(0x05)(0x24).convert_to_container<std::vector<unsigned char> >();
-        base58Prefixes[SCRIPT_ADDRESS] = boost::assign::list_of(0xC8)(0x05)(0x25).convert_to_container<std::vector<unsigned char> >();
-        base58Prefixes[SECRET_KEY]     = boost::assign::list_of(0xC8)(0x05)(0xDE).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[PUBKEY_ADDRESS] = boost::assign::list_of(0xC7)(0xE4)(0xD7).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[SCRIPT_ADDRESS] = boost::assign::list_of(0xC7)(0xE4)(0xD8).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[SECRET_KEY]     = boost::assign::list_of(0xC8)(0x06)(0xDE).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_PUBLIC_KEY] = boost::assign::list_of(0x04)(0x35)(0x87)(0xCF).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_SECRET_KEY] = boost::assign::list_of(0x04)(0x35)(0x83)(0x94).convert_to_container<std::vector<unsigned char> >();
 
         consensus.BIP34Height                    = 1;
-        consensus.BIP34Hash                      = uint256S("0000000000000000000000000000000000000000000000000000000000000000");
+        consensus.BIP34Hash                      = uint256S("0x00");
         consensus.BIP65Height                    = 1;
         consensus.BIP66Height                    = 1;
         consensus.powLimit                       = uint256S("007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -268,37 +284,35 @@ public:
         consensus.nMinimumChainWork = uint256S("0x00");
 
         // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256S("0x43a16a626ef2ffdbe928f2bc26dcd5475c6a1a04f9542dfc6a0a88e5fcf9bd4c"); //8711
+        consensus.defaultAssumeValid = uint256S("0x00");
 
         consensus.countOfInitialAmountBlocks = 100;
-        consensus.countOfInitialAwardBlocks  = 100;
+        consensus.countOfInitialAwardBlocks  = 0;
         consensus.minGranularity             = 10*COIN;
         consensus.granularities              = std::vector<std::pair<uint32_t, int64_t> >(
                                                 {{0, 100*COIN}});
 
         consensus.moneyBoxAddress = makeMoneyBoxScriptPubKey();
-        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this), 0.02),
+        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U1xtDNR5B9ik8qbMZETkH3jtfKp8BGPaHYSAD", *this), 0.02),
                                      std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
 
         consensus.maxCaBlock                 = 0;
-        consensus.defaultFeeReductionBlock   = 29000;
         consensus.maxTotalAmount             = 5500000 * COIN;
 
-        consensus.startTotalNgBlock          = 152000;
+        consensus.startTotalNgBlock          = 1;
 
-        pchMessageStart[0] = 0xfc;
-        pchMessageStart[1] = 0xd1;
-        pchMessageStart[2] = 0xc7;
-        pchMessageStart[3] = 0xf0;
+        pchMessageStart[0] = 0xfd;
+        pchMessageStart[1] = 0xd0;
+        pchMessageStart[2] = 0xc8;
+        pchMessageStart[3] = 0xef;
 
-        nDefaultPort       = 19835;
+        nDefaultPort       = 17392;
         nPruneAfterHeight  = 1000;
 
         vFixedSeeds.clear();
         vSeeds.clear();
 
         // nodes with support for servicebits filtering should be at the top
-        vSeeds.push_back(CDNSSeedData("bc0.testnet.plcu.io", false));
         vSeeds.push_back(CDNSSeedData("bc1.testnet.plcu.io", false));
         vSeeds.push_back(CDNSSeedData("bc2.testnet.plcu.io", false));
         vSeeds.push_back(CDNSSeedData("bc3.testnet.plcu.io", false));
@@ -322,25 +336,25 @@ public:
 
     void init()
     {
-        const char * pszTimestamp = "22/Oct/2021 testnet";
+        const char * pszTimestamp = "21/Now/2022 testnet";
 
         std::vector<CScript> scripts(10);
-        scripts[0] << OP_RETURN << ParseHex("036daf2772300f2226baf3a5012f23a5e775be80d7324427319a6f39d43b71271b");
-        scripts[1] << OP_RETURN << ParseHex("034d83ef03bf4bdd6b6acb1fe164c03b2098eb1db605162fdd57c8846717fed83a");
-        scripts[2] << OP_RETURN << ParseHex("03e63753c25c8fd5d0fe769e3f8c8601438db8e0a16420a09cd18dc049dd9f8521");
-        scripts[3] << OP_RETURN << ParseHex("032b2b33fc097606930ebe94c17397ca0487fe61176b808dbd0cea420f10b2ca96");
-        scripts[4] << OP_RETURN << ParseHex("036bfcf2c1eb983536ddde4f7af64cdb8ef2c2cdd08dbbb7735858b3e101c6edb4");
-        scripts[5] << OP_RETURN << ParseHex("0287796a6e81d9e6060d50f86c19434391a69f13afb9d4999790b1cdc62ef09dc0");
-        scripts[6] << OP_RETURN << ParseHex("02b59fc18825693c7497e23bae68e5331f7c751b6bdc3b216a64d1e6b5a23da5eb");
-        scripts[7] << OP_RETURN << ParseHex("027b2ed67aedade28d0832e75ebbadc9aec8f418fb8a6ecbe02bdd61dd338d9cb9");
-        scripts[8] << OP_RETURN << ParseHex("0263b101775655a0a9f8b19a9a84ad6b41d97d07b30ae8e9269614c620fc0addea");
-        scripts[9] << OP_RETURN << ParseHex("024e84be3ce19f99e32cbc0314ff80b8a4f81b0d5393220330248c3316cb7474d0");
+        scripts[0] << OP_RETURN << ParseHex("02f7e849e2b11f743920eabd7b9a7c7fad3699b89b8daa68d51dd100b52c8e214d");
+        scripts[1] << OP_RETURN << ParseHex("02686badf81e5d4f8064113162b73cdff7f00e8562d6ca6289e3ff5f3723206e0e");
+        scripts[2] << OP_RETURN << ParseHex("032846379dc755ce383e424dfca703f345bc827af12636aef73342018fb1161bd4");
+        scripts[3] << OP_RETURN << ParseHex("03e2a373a4b19793b3fdc0e070d3ebcae59b20cf18f6666dc3c4295ef5bf45dbda");
+        scripts[4] << OP_RETURN << ParseHex("03ce0ff8cd1854e522d36dc6ffe68b2a49441995866f86a4bb9adcb9b90829b9c4");
+        scripts[5] << OP_RETURN << ParseHex("033edf26a33af400befd54f4de237531a6df169cb22529f928415e972d6d0c194a");
+        scripts[6] << OP_RETURN << ParseHex("027a98c0d1f519812119eb907ca5d9cc068cd58d5c1d0d32f129d10b53c030b68d");
+        scripts[7] << OP_RETURN << ParseHex("02de8eadbf3d27b3c7f9eef66f19f5ba291a1879b955171bd56c606023c3edee98");
+        scripts[8] << OP_RETURN << ParseHex("02092ee2eac0cb99462b26db08e8d43fbe529ad73c5a258bd75807806a2c567cab");
+        scripts[9] << OP_RETURN << ParseHex("031784e02877cd8492cb9b04692e1f561ce81d921528acba234a35dcd09476beb3");
 
-        genesis = CreateGenesisBlock(pszTimestamp, scripts, 1634850000, 0xf9f, 0x1f7fffff, 1, 1 * COIN, consensus);
+        genesis = CreateGenesisBlock(pszTimestamp, scripts, 1668988800, 0x1237, 0x1f7fffff, 1, 1 * COIN, consensus);
         consensus.hashGenesisBlock = genesis.GetHash();
 
-        assert(consensus.hashGenesisBlock == uint256S("83b43792fc6255e24d471ce91e4d2a31de74280990ce8ff220c04227864d5377"));
-        assert(genesis.hashMerkleRoot == uint256S("3f8c26b097a00ef6f5ce9a1191b885c26c678c327d14f79f627592b4a6d12449"));
+        assert(consensus.hashGenesisBlock == uint256S("ce95c8d8efa83ab317fc1977d576f91ec2b685be861d31b3ba5857e00700e6c4"));
+        assert(genesis.hashMerkleRoot == uint256S("8fc0a72ccd63393b22a408021ec285bd5074f2f92df4c915ec9dad2c29d873bd"));
     }
 };
 
@@ -352,9 +366,9 @@ public:
     CRegTestParams() {
         strNetworkID = "regtest";
 
-        base58Prefixes[PUBKEY_ADDRESS] = boost::assign::list_of(0xC8)(0x05)(0x24).convert_to_container<std::vector<unsigned char> >();
-        base58Prefixes[SCRIPT_ADDRESS] = boost::assign::list_of(0xC8)(0x05)(0x25).convert_to_container<std::vector<unsigned char> >();
-        base58Prefixes[SECRET_KEY]     = boost::assign::list_of(0xC8)(0x05)(0xDE).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[PUBKEY_ADDRESS] = boost::assign::list_of(0xC7)(0xE4)(0xD7).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[SCRIPT_ADDRESS] = boost::assign::list_of(0xC7)(0xE4)(0xD8).convert_to_container<std::vector<unsigned char> >();
+        base58Prefixes[SECRET_KEY]     = boost::assign::list_of(0xC8)(0x06)(0xDE).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_PUBLIC_KEY] = boost::assign::list_of(0x04)(0x35)(0x87)(0xCF).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_SECRET_KEY] = boost::assign::list_of(0x04)(0x35)(0x83)(0x94).convert_to_container<std::vector<unsigned char> >();
 
@@ -389,27 +403,26 @@ public:
         consensus.defaultAssumeValid = uint256S("0x00");
 
         consensus.countOfInitialAmountBlocks = 100;
-        consensus.countOfInitialAwardBlocks  = 100;
+        consensus.countOfInitialAwardBlocks  = 0;
         consensus.minGranularity             = 10*COIN;
         consensus.granularities              = std::vector<std::pair<uint32_t, int64_t> >(
                                                {{0, 100*COIN}});
 
         consensus.moneyBoxAddress = makeMoneyBoxScriptPubKey();
-        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk", *this), 0.02),
+        consensus.graveAddresses  = {std::make_pair(makeGraveScriptPubKey("U1xtDNR5B9ik8qbMZETkH3jtfKp8BGPaHYSAD", *this), 0.02),
                                      std::make_pair(makeMausoleumScriptPubKey(), 0.01)};
 
         consensus.maxCaBlock                 = 512;
-        consensus.defaultFeeReductionBlock   = 2000;
-        consensus.maxTotalAmount             = 1100000 * COIN;
+        consensus.maxTotalAmount             = 2000000 * COIN;
 
-        consensus.startTotalNgBlock          = 550;
+        consensus.startTotalNgBlock          = 1;
 
-        pchMessageStart[0] = 0xef;
-        pchMessageStart[1] = 0xbe;
-        pchMessageStart[2] = 0xb4;
-        pchMessageStart[3] = 0xd9;
+        pchMessageStart[0] = 0xf0;
+        pchMessageStart[1] = 0xbd;
+        pchMessageStart[2] = 0xb5;
+        pchMessageStart[3] = 0xd8;
 
-        nDefaultPort       = 19945;
+        nDefaultPort       = 29302;
         nPruneAfterHeight  = 1000;
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
@@ -432,25 +445,25 @@ public:
 
     void init()
     {
-        const char * pszTimestamp = "22/Oct/2021 regtest";
+        const char * pszTimestamp = "21/Now/2022 regtest";
 
         std::vector<CScript> scripts(10);
-        scripts[0] << OP_RETURN << ParseHex("036daf2772300f2226baf3a5012f23a5e775be80d7324427319a6f39d43b71271b");
-        scripts[1] << OP_RETURN << ParseHex("034d83ef03bf4bdd6b6acb1fe164c03b2098eb1db605162fdd57c8846717fed83a");
-        scripts[2] << OP_RETURN << ParseHex("03e63753c25c8fd5d0fe769e3f8c8601438db8e0a16420a09cd18dc049dd9f8521");
-        scripts[3] << OP_RETURN << ParseHex("032b2b33fc097606930ebe94c17397ca0487fe61176b808dbd0cea420f10b2ca96");
-        scripts[4] << OP_RETURN << ParseHex("036bfcf2c1eb983536ddde4f7af64cdb8ef2c2cdd08dbbb7735858b3e101c6edb4");
-        scripts[5] << OP_RETURN << ParseHex("0287796a6e81d9e6060d50f86c19434391a69f13afb9d4999790b1cdc62ef09dc0");
-        scripts[6] << OP_RETURN << ParseHex("02b59fc18825693c7497e23bae68e5331f7c751b6bdc3b216a64d1e6b5a23da5eb");
-        scripts[7] << OP_RETURN << ParseHex("027b2ed67aedade28d0832e75ebbadc9aec8f418fb8a6ecbe02bdd61dd338d9cb9");
-        scripts[8] << OP_RETURN << ParseHex("0263b101775655a0a9f8b19a9a84ad6b41d97d07b30ae8e9269614c620fc0addea");
-        scripts[9] << OP_RETURN << ParseHex("024e84be3ce19f99e32cbc0314ff80b8a4f81b0d5393220330248c3316cb7474d0");
+        scripts[0] << OP_RETURN << ParseHex("02f7e849e2b11f743920eabd7b9a7c7fad3699b89b8daa68d51dd100b52c8e214d");
+        scripts[1] << OP_RETURN << ParseHex("02686badf81e5d4f8064113162b73cdff7f00e8562d6ca6289e3ff5f3723206e0e");
+        scripts[2] << OP_RETURN << ParseHex("032846379dc755ce383e424dfca703f345bc827af12636aef73342018fb1161bd4");
+        scripts[3] << OP_RETURN << ParseHex("03e2a373a4b19793b3fdc0e070d3ebcae59b20cf18f6666dc3c4295ef5bf45dbda");
+        scripts[4] << OP_RETURN << ParseHex("03ce0ff8cd1854e522d36dc6ffe68b2a49441995866f86a4bb9adcb9b90829b9c4");
+        scripts[5] << OP_RETURN << ParseHex("033edf26a33af400befd54f4de237531a6df169cb22529f928415e972d6d0c194a");
+        scripts[6] << OP_RETURN << ParseHex("027a98c0d1f519812119eb907ca5d9cc068cd58d5c1d0d32f129d10b53c030b68d");
+        scripts[7] << OP_RETURN << ParseHex("02de8eadbf3d27b3c7f9eef66f19f5ba291a1879b955171bd56c606023c3edee98");
+        scripts[8] << OP_RETURN << ParseHex("02092ee2eac0cb99462b26db08e8d43fbe529ad73c5a258bd75807806a2c567cab");
+        scripts[9] << OP_RETURN << ParseHex("031784e02877cd8492cb9b04692e1f561ce81d921528acba234a35dcd09476beb3");
 
-        genesis = CreateGenesisBlock(pszTimestamp, scripts, 1634850000, 0, 0x1f7fffff, 1, 1 * COIN, consensus);
+        genesis = CreateGenesisBlock(pszTimestamp, scripts, 1668988800, 0, 0x1f7fffff, 1, 1 * COIN, consensus);
         consensus.hashGenesisBlock = genesis.GetHash();
 
-        assert(consensus.hashGenesisBlock == uint256S("5cb90a95d9f64031633b7c6d640834c17cf02be6cc16abef37c7bd3e7dba7b2e"));
-        assert(genesis.hashMerkleRoot == uint256S("55cea9dc9eb2488fa176bf3fc5bebe8e4e83e87ab5521d4320f23f0cc730c852"));
+        assert(consensus.hashGenesisBlock == uint256S("443e3a1ab2119e08119d2a2d618da3c78abf6b31ba5e493df7b8516e3ea89764"));
+        assert(genesis.hashMerkleRoot == uint256S("dfa5b9593bf255ccf3e688e79896b0af2de46da11fad2d17b01383923e2de772"));
     }
 
     void UpdateBIP9Parameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout)

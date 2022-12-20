@@ -11,7 +11,7 @@ import binascii
 
 
 def get_moneybox_granularity(height=None):
-    return 100 * COIN
+    return ToSatoshi(MONEYBOX_GRANULARITY)
 
 # Create a block (with regtest difficulty)
 def create_block(hashprev, coinbase, nTime=None, bits=None, version=None, tx_list=[]):
@@ -75,19 +75,14 @@ def serialize_script_num(value):
 
 
 def get_subsidy(height, minerfees, network = 'regtest'):
-    next_height = {
-        'regtest': 2000,
-        'testnet': 119000,
-        'main': 25000,
-    }
     if height <= 100:
         return int(BASE_CB_AMOUNT * COIN)
-    elif height <= next_height[network]:
-        return max(500000, int(minerfees / 2))  # int(0.005*COIN)
-    return max(5000, int(minerfees / 2))  # int(0.00005*COIN)
+    return max(int(CB_AMOUNT_AFTER_BLOCK_100 * COIN), int(minerfees / 2))  # int(0.00005*COIN)
 
 
 def get_plc_award(height, refill_moneybox_amount, granularity):
+    if not granularity:
+        return []
     if height <= 100:
         return [granularity] * 10
     outputs = [granularity] * (refill_moneybox_amount // granularity)

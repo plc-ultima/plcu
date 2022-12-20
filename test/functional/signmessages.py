@@ -8,7 +8,7 @@ from base64 import b64encode, b64decode
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.script import *
 from test_framework.util import *
-from test_framework.key import CECKey, sign_compact, recover_public_key
+from test_framework.key import CECKey, sign_compact, recover_public_key, create_key
 
 
 class SignMessagesTest(BitcoinTestFramework):
@@ -21,7 +21,7 @@ class SignMessagesTest(BitcoinTestFramework):
         message = 'This is just a test message'
 
         self.log.info('test signing with priv_key')
-        priv_key_b58 = 'AwSa9YNVSy7Htw6ovCVp9cuB5jNUPv2isdjGMjYD7c9T8qzGf5yjYwg'
+        priv_key_b58 = 'AwTDtzmAUsuGAw7aYwtq9TTVvMec1qJxY1rgye27zUZ3gdKDzTKp447'
         priv_key_bin = b58decode_chk(priv_key_b58)[3:]
         key = CECKey()
         key.set_secretbytes(priv_key_bin)

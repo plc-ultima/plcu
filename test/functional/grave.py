@@ -162,23 +162,23 @@ class GraveTest(BitcoinTestFramework):
 
         if subtractfeefromamount and changeToNewAddress:
             (burn_expected1, burn_expected2) = GetBurnedValue(amount_sent + change)
-            assert_equal(burn_got1, burn_expected1)
-            assert_equal(burn_got2, burn_expected2)
+            assert_almost_equal(burn_got1, burn_expected1, ToCoins(1))
+            assert_almost_equal(burn_got2, burn_expected2, ToCoins(1))
             assert_equal(amount, amount_sent + burn_got1 + burn_got2 + fee)
         elif subtractfeefromamount:
             (burn_expected1, burn_expected2) = GetBurnedValue(amount_sent)
-            assert_equal(burn_got1, burn_expected1)
-            assert_equal(burn_got2, burn_expected2)
+            assert_almost_equal(burn_got1, burn_expected1, ToCoins(1))
+            assert_almost_equal(burn_got2, burn_expected2, ToCoins(1))
             assert_equal(amount, amount_sent + burn_got1 + burn_got2 + fee)
         elif changeToNewAddress:
             (burn_expected1, burn_expected2) = GetBurnedValue(amount + change)
-            assert_equal(burn_got1, burn_expected1)
-            assert_equal(burn_got2, burn_expected2)
+            assert_almost_equal(burn_got1, burn_expected1, ToCoins(1))
+            assert_almost_equal(burn_got2, burn_expected2, ToCoins(1))
             assert_equal(amount, amount_sent)
         else:
             (burn_expected1, burn_expected2) = GetBurnedValue(amount)
-            assert_equal(burn_got1, burn_expected1)
-            assert_equal(burn_got2, burn_expected2)
+            assert_almost_equal(burn_got1, burn_expected1, ToCoins(1))
+            assert_almost_equal(burn_got2, burn_expected2, ToCoins(1))
             assert_equal(amount, amount_sent)
 
         if change_index != -1:
@@ -307,27 +307,27 @@ class GraveTest(BitcoinTestFramework):
         # Here we still have only utxos with amount 5000
         # check calls without change:
         for changeToNewAddress in [False, True]:
-            self.check_sendtoaddress(node0, addr1, Decimal(5000), subtractfeefromamount=True, changeToNewAddress=changeToNewAddress, changeExists=False)
-            self.check_sendmany(node0, {addr1: Decimal(5000)}, changeToNewAddress=changeToNewAddress, subtractfeefrom=[addr1], changeExists=False)
-            self.check_sendmany(node0, {addr1: Decimal(5000), addr2: Decimal(5000)}, changeToNewAddress=changeToNewAddress, subtractfeefrom=[addr2], changeExists=False)
-            self.check_sendmany(node0, {addr1: Decimal(5000), addr2: Decimal(5000)}, changeToNewAddress=changeToNewAddress, subtractfeefrom=[addr2, addr1], changeExists=False)
+            self.check_sendtoaddress(node0, addr1, BASE_CB_AMOUNT, subtractfeefromamount=True, changeToNewAddress=changeToNewAddress, changeExists=False)
+            self.check_sendmany(node0, {addr1: BASE_CB_AMOUNT}, changeToNewAddress=changeToNewAddress, subtractfeefrom=[addr1], changeExists=False)
+            self.check_sendmany(node0, {addr1: BASE_CB_AMOUNT, addr2: BASE_CB_AMOUNT}, changeToNewAddress=changeToNewAddress, subtractfeefrom=[addr2], changeExists=False)
+            self.check_sendmany(node0, {addr1: BASE_CB_AMOUNT, addr2: BASE_CB_AMOUNT}, changeToNewAddress=changeToNewAddress, subtractfeefrom=[addr2, addr1], changeExists=False)
 
         changeToNewAddress = False
         for subtractfeefromamount in [False, True]:
             self.check_sendtoaddress(node0, addr1, amount, subtractfeefromamount, changeToNewAddress)
             self.check_sendtoaddress(node0, addr1, Decimal(400), subtractfeefromamount, changeToNewAddress)
-            self.check_sendtoaddress(node0, addr1, Decimal(5000), subtractfeefromamount, changeToNewAddress)
+            self.check_sendtoaddress(node0, addr1, BASE_CB_AMOUNT, subtractfeefromamount, changeToNewAddress)
         for subtractfeefrom in [[], [addr1], [addr1, addr3], [addr1, addr2, addr3]]:
             self.check_sendmany(node0, {addr1: amount, addr2: amount * 2, addr3: amount * 3}, changeToNewAddress, subtractfeefrom)
             self.check_sendmany(node0, {addr1: Decimal(800), addr2: Decimal(1200), addr3: Decimal(1400)}, changeToNewAddress, subtractfeefrom)
-            self.check_sendmany(node0, {addr1: Decimal(200), addr2: Decimal(200), addr3: Decimal(5000)}, changeToNewAddress, subtractfeefrom)
+            self.check_sendmany(node0, {addr1: Decimal(600), addr2: Decimal(600), addr3: BASE_CB_AMOUNT}, changeToNewAddress, subtractfeefrom)
         node0.generate(1)
         self.sync_all()
 
         changeToNewAddress = True
         for subtractfeefromamount in [False, True]:
             self.check_sendtoaddress(node0, addr1, Decimal(400), subtractfeefromamount, changeToNewAddress=True)
-            self.check_sendtoaddress(node0, addr1, Decimal(5000), subtractfeefromamount, changeToNewAddress=True)
+            self.check_sendtoaddress(node0, addr1, BASE_CB_AMOUNT, subtractfeefromamount, changeToNewAddress=True)
         self.check_sendtoaddress(node0, addr1, amount, subtractfeefromamount=False, changeToNewAddress=True)
 
         # No chance to pay 3% burn from addr1 amount - too little:

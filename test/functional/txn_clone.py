@@ -24,7 +24,7 @@ class TxnMallTest(BitcoinTestFramework):
         disconnect_nodes(self.nodes[2], 1)
 
     def run_test(self):
-        miner_reward = Decimal('0.005')
+        miner_reward = CB_AMOUNT_AFTER_BLOCK_100
         # All nodes should start with starting_balance:
         starting_balance = BASE_CB_AMOUNT * 25
         for i in range(self.num_nodes):

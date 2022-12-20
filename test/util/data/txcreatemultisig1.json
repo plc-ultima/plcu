@@ -18,9 +18,9 @@
                 "reqSigs": 2,
                 "type": "multisig",
                 "addresses": [
-                    "U2xHJyUnVXUZTFLVf4VR71eKAfsAi5G6cbuxn", 
-                    "U2xHJi7kbirSVbDjabdUCtVgE2FMxs4ta6mJC", 
-                    "U2xH7X8MP1ZuimzdT6DpYFu5MXgeXNVC5zQTg"
+                    "U1xPrpX2SRYGAnad3hfCVnN8yZXZeJS48jniW", 
+                    "U1xPrZ9zYcv9D8TryEoFbfDW2uuku6Eqd19w3", 
+                    "U1xPfNAbKudcSKEkqjPbw2cuARM3Tbf5kespP"
                 ]
             }
         }

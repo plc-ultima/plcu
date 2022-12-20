@@ -40,12 +40,12 @@ class MempoolCoinbaseTest(BitcoinTestFramework):
         # and make sure the mempool code behaves correctly.
         b = [ self.nodes[0].getblockhash(n) for n in range(101, 105) ]
         coinbase_txids = [ self.nodes[0].getblock(h)['tx'][0] for h in b ]
-        spend_101_raw = create_tx(self.nodes[0], coinbase_txids[1], node1_address, Decimal('0.004'))
-        spend_102_raw = create_tx(self.nodes[0], coinbase_txids[2], node0_address, Decimal('0.004'))
-        spend_103_raw = create_tx(self.nodes[0], coinbase_txids[3], node0_address, Decimal('0.004'))
+        spend_101_raw = create_tx(self.nodes[0], coinbase_txids[1], node1_address, Decimal('0.00004'))
+        spend_102_raw = create_tx(self.nodes[0], coinbase_txids[2], node0_address, Decimal('0.00004'))
+        spend_103_raw = create_tx(self.nodes[0], coinbase_txids[3], node0_address, Decimal('0.00004'))
 
         # Create a transaction which is time-locked to two blocks in the future
-        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('0.004'))
+        (burn1, burn2, rest) = BurnedAndChangeAmount(Decimal('0.00004'))
         timelock_tx = self.nodes[0].createrawtransaction([{"txid": coinbase_txids[0], "vout": 0}],
                                                          {node0_address: rest, GRAVE_ADDRESS_1: burn1, GRAVE_ADDRESS_2: burn2})
         # Set the time lock
@@ -67,8 +67,8 @@ class MempoolCoinbaseTest(BitcoinTestFramework):
         assert_raises_rpc_error(-26,'non-final', self.nodes[0].sendrawtransaction, timelock_tx)
 
         # Create 102_1 and 103_1:
-        spend_102_1_raw = create_tx(self.nodes[0], spend_102_id, node1_address, Decimal('0.003'))
-        spend_103_1_raw = create_tx(self.nodes[0], spend_103_id, node1_address, Decimal('0.003'))
+        spend_102_1_raw = create_tx(self.nodes[0], spend_102_id, node1_address, Decimal('0.00003'))
+        spend_103_1_raw = create_tx(self.nodes[0], spend_103_id, node1_address, Decimal('0.00003'))
 
         # Broadcast and mine 103_1:
         spend_103_1_id = self.nodes[0].sendrawtransaction(spend_103_1_raw)

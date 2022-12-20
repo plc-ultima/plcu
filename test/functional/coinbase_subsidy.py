@@ -16,9 +16,8 @@ from test_framework.certs import send_block
 coinbase_subsidy.py
 '''
 
-DEFAULT_CB_BEFORE_BLOCK_100  = 5000 * COIN
-DEFAULT_CB_AFTER_BLOCK_100   = int(0.005 * COIN)
-DEFAULT_CB_AFTER_BLOCK_2000 = int(0.00005 * COIN)
+DEFAULT_CB_BEFORE_BLOCK_100  = ToSatoshi(BASE_CB_AMOUNT)
+DEFAULT_CB_AFTER_BLOCK_100   = ToSatoshi(CB_AMOUNT_AFTER_BLOCK_100)
 
 
 # TestNode: bare-bones "peer".
@@ -48,7 +47,7 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
-        self.extra_args = [['-debug', '-whitelist=127.0.0.1', '-totalforkblock-regtest=2500']]
+        self.extra_args = [['-debug', '-whitelist=127.0.0.1']]
         self.outpoints = []
 
 
@@ -134,48 +133,65 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         cb.vout[0].nValue += 1
         self.compose_and_send_block(cb, [], False, 'bad-cb-amount')
 
-        # A-04
-        # (0 < height <= 100), moneybox refill is less than required: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        cb.vout[1].nValue -= 1
-        self.compose_and_send_block(cb, [], False, 'bad-box-amount')
+        if MONEYBOX_GRANULARITY:
+            # A-04
+            # (0 < height <= 100), moneybox refill is less than required: rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
+            cb.vout[1].nValue -= 1
+            self.compose_and_send_block(cb, [], False, 'bad-box-amount')
 
-        # A-05
-        # (0 < height <= 100), moneybox refill is more than required (and more than granularity): rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        cb.vout[1].nValue += 1
-        self.compose_and_send_block(cb, [], False, 'bad-txns-moneybox-value-toolarge')
+            # A-05
+            # (0 < height <= 100), moneybox refill is more than required (and more than granularity): rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
+            cb.vout[1].nValue += 1
+            self.compose_and_send_block(cb, [], False, 'bad-txns-moneybox-value-toolarge')
 
-        # A-06
-        # (0 < height <= 100), moneybox refill is more than required in one output (and more than granularity) and less in another, summary OK: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        cb.vout[1].nValue += 1
-        cb.vout[2].nValue -= 1
-        self.compose_and_send_block(cb, [], False, 'bad-txns-moneybox-value-toolarge')
+            # A-06
+            # (0 < height <= 100), moneybox refill is more than required in one output (and more than granularity) and less in another, summary OK: rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
+            cb.vout[1].nValue += 1
+            cb.vout[2].nValue -= 1
+            self.compose_and_send_block(cb, [], False, 'bad-txns-moneybox-value-toolarge')
 
-        # A-07
-        # (0 < height <= 100), moneybox refill is more than required (has an extra output, granularity is OK): rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        cb.vout.append(CTxOut(1 * COIN, cb.vout[-1].scriptPubKey))
-        self.compose_and_send_block(cb, [], False, 'bad-box-amount')
+            # A-07
+            # (0 < height <= 100), moneybox refill is more than required (has an extra output, granularity is OK): rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
+            cb.vout.append(CTxOut(1 * COIN, cb.vout[-1].scriptPubKey))
+            self.compose_and_send_block(cb, [], False, 'bad-box-amount')
 
-        # A-08
-        # (0 < height <= 100), moneybox refill is less than required in one output, but has extra output with this amount, summary OK: accepted
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        delta = 1 * COIN
-        cb.vout[1].nValue -= delta
-        cb.vout.append(CTxOut(delta, cb.vout[-1].scriptPubKey))
-        self.compose_and_send_block(cb, [], True)
+            # A-08
+            # (0 < height <= 100), moneybox refill is less than required in one output, but has extra output with this amount, summary OK: accepted
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
+            delta = 1 * COIN
+            cb.vout[1].nValue -= delta
+            cb.vout.append(CTxOut(delta, cb.vout[-1].scriptPubKey))
+            self.compose_and_send_block(cb, [], True)
 
-        # A-09
-        # (0 < height <= 100), moneybox refill is less than required in 2 outputs, but has 2 extra outputs with this amount, summary OK: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        delta = 1 * COIN
-        cb.vout[1].nValue -= delta
-        cb.vout[2].nValue -= delta
-        cb.vout.append(CTxOut(delta, cb.vout[-1].scriptPubKey))
-        cb.vout.append(CTxOut(delta, cb.vout[-1].scriptPubKey))
-        self.compose_and_send_block(cb, [], False, 'bad-box-count')
+            # A-09
+            # (0 < height <= 100), moneybox refill is less than required in 2 outputs, but has 2 extra outputs with this amount, summary OK: rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
+            delta = 1 * COIN
+            cb.vout[1].nValue -= delta
+            cb.vout[2].nValue -= delta
+            cb.vout.append(CTxOut(delta, cb.vout[-1].scriptPubKey))
+            cb.vout.append(CTxOut(delta, cb.vout[-1].scriptPubKey))
+            self.compose_and_send_block(cb, [], False, 'bad-box-count')
+        else:
+            # A-05A
+            # (0 < height <= 100), moneybox refill with granularity 10: rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, granularity=10 * COIN)
+            self.compose_and_send_block(cb, [], False, 'bad-box-amount')
+
+            # A-06A
+            # (0 < height <= 100), moneybox refill with granularity 100: rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, granularity=100 * COIN)
+            self.compose_and_send_block(cb, [], False, 'bad-box-amount')
+
+            # A-07A
+            # (0 < height <= 100), moneybox refill with granularity 100 (and less than required): rejected
+            cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, granularity=100 * COIN)
+            cb.vout[1].nValue -= 1
+            self.compose_and_send_block(cb, [], False, 'bad-box-amount')
 
         node0.generate(100)
         self.outpoint_amount = Decimal(10)
@@ -183,30 +199,30 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         node0.generate(1)
 
         # A-10
-        # (100 < height <= 2000), normal coinbase without other transactions: accepted
+        # (100 < height), normal coinbase without other transactions: accepted
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
         assert_equal(cb.vout[0].nValue, DEFAULT_CB_AFTER_BLOCK_100)
         self.compose_and_send_block(cb, [], True)
 
         # A-11
-        # (100 < height <= 2000), without other transactions
+        # (100 < height), without other transactions
         # coinbase subsidy is less than allowed: accepted
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
         cb.vout[0].nValue -= 1
         self.compose_and_send_block(cb, [], True)
 
         # A-12
-        # (100 < height <= 2000), without other transactions
+        # (100 < height), without other transactions
         # coinbase subsidy is more than allowed: rejected
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
         cb.vout[0].nValue += 1
         self.compose_and_send_block(cb, [], False, 'bad-cb-amount')
 
         # A-13
-        # (100 < height <= 2000),
-        # (sum(tx_fees) / 2 < 0.005): 0.005 is used: accepted
-        fee1 = int(0.004 * COIN)
-        fee2 = int(0.003 * COIN)
+        # (100 < height),
+        # (sum(tx_fees) / 2 < 0.00005): 0.00005 is used: accepted
+        fee1 = int(0.00004 * COIN)
+        fee2 = int(0.00003 * COIN)
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
         assert_equal(cb.vout[0].nValue, DEFAULT_CB_AFTER_BLOCK_100)
         tx1 = self.create_tx_with_fee(fee1)
@@ -214,8 +230,8 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         self.compose_and_send_block(cb, [tx1, tx2], True)
 
         # A-14
-        # (100 < height <= 2000),
-        # (sum(tx_fees) / 2 < 0.005): 0.005 must be used, try 1 satoshi more: rejected
+        # (100 < height),
+        # (sum(tx_fees) / 2 < 0.00005): 0.00005 must be used, try 1 satoshi more: rejected
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
         assert_equal(cb.vout[0].nValue, DEFAULT_CB_AFTER_BLOCK_100)
         cb.vout[0].nValue += 1
@@ -224,88 +240,7 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-cb-amount')
 
         # A-15
-        # (100 < height <= 2000),
-        # (sum(tx_fees) / 2 > 0.005): sum(tx_fees) / 2 is used: accepted
-        fee1 = int(0.006 * COIN)
-        fee2 = int(0.007 * COIN)
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
-        assert_equal(cb.vout[0].nValue, (fee1 + fee2) // 2)
-        tx1 = self.create_tx_with_fee(fee1)
-        tx2 = self.create_tx_with_fee(fee2)
-        self.compose_and_send_block(cb, [tx1, tx2], True)
-
-        # A-16
-        # (100 < height <= 2000),
-        # (sum(tx_fees) / 2 > 0.005): sum(tx_fees) / 2 must be used, try 1 satoshi more: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
-        assert_equal(cb.vout[0].nValue, (fee1 + fee2) // 2)
-        cb.vout[0].nValue += 1
-        tx1 = self.create_tx_with_fee(fee1)
-        tx2 = self.create_tx_with_fee(fee2)
-        self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-cb-amount')
-
-        # A-17
-        # (100 < height <= 2000), without other transactions
-        # try to fill up moneybox: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        moneybox_vout.nValue = DEFAULT_CB_AFTER_BLOCK_100
-        cb.vout.append(moneybox_vout)
-        self.compose_and_send_block(cb, [], False, 'bad-box-amount')
-
-        # A-18
-        # (100 < height <= 2000), with normal transactions not spending moneybox
-        # try to fill up moneybox: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
-        cb.vout.append(moneybox_vout)
-        tx1 = self.create_tx_with_fee(fee1)
-        tx2 = self.create_tx_with_fee(fee2)
-        self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-box-amount')
-
-        generate_many_blocks(node0, 2001 - node0.getblockcount())
-
-        # A-20
-        # (height > 2000), normal coinbase without other transactions: accepted
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        assert_equal(cb.vout[0].nValue, DEFAULT_CB_AFTER_BLOCK_2000)
-        self.compose_and_send_block(cb, [], True)
-
-        # A-21
-        # (height > 2000), without other transactions
-        # coinbase subsidy is less than allowed: accepted
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        cb.vout[0].nValue -= 1
-        self.compose_and_send_block(cb, [], True)
-
-        # A-22
-        # (height > 2000), without other transactions
-        # coinbase subsidy is more than allowed: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        cb.vout[0].nValue += 1
-        self.compose_and_send_block(cb, [], False, 'bad-cb-amount')
-
-        # A-23
-        # (height > 2000),
-        # (sum(tx_fees) / 2 < 0.00005): 0.00005 is used: accepted
-        fee1 = int(0.00004 * COIN)
-        fee2 = int(0.00003 * COIN)
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
-        assert_equal(cb.vout[0].nValue, DEFAULT_CB_AFTER_BLOCK_2000)
-        tx1 = self.create_tx_with_fee(fee1)
-        tx2 = self.create_tx_with_fee(fee2)
-        self.compose_and_send_block(cb, [tx1, tx2], True)
-
-        # A-24
-        # (height > 2000),
-        # (sum(tx_fees) / 2 < 0.00005): 0.00005 must be used, try 1 satoshi more: rejected
-        cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
-        assert_equal(cb.vout[0].nValue, DEFAULT_CB_AFTER_BLOCK_2000)
-        cb.vout[0].nValue += 1
-        tx1 = self.create_tx_with_fee(fee1)
-        tx2 = self.create_tx_with_fee(fee2)
-        self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-cb-amount')
-
-        # A-25
-        # (height > 2000),
+        # (100 < height),
         # (sum(tx_fees) / 2 > 0.00005): sum(tx_fees) / 2 is used: accepted
         fee1 = int(0.00006 * COIN)
         fee2 = int(0.00007 * COIN)
@@ -315,9 +250,9 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         tx2 = self.create_tx_with_fee(fee2)
         self.compose_and_send_block(cb, [tx1, tx2], True)
 
-        # A-26
-        # (height > 2000),
-        # (sum(tx_fees) / 2 > 0.005): sum(tx_fees) / 2 must be used, try 1 satoshi more: rejected
+        # A-16
+        # (100 < height),
+        # (sum(tx_fees) / 2 > 0.00005): sum(tx_fees) / 2 must be used, try 1 satoshi more: rejected
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
         assert_equal(cb.vout[0].nValue, (fee1 + fee2) // 2)
         cb.vout[0].nValue += 1
@@ -325,22 +260,22 @@ class CoinbaseSubsidyTest(BitcoinTestFramework):
         tx2 = self.create_tx_with_fee(fee2)
         self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-cb-amount')
 
-        # A-27
-        # (height > 2000), without other transactions
+        # A-17
+        # (100 < height), without other transactions
         # try to fill up moneybox: rejected
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey)
-        moneybox_vout.nValue = DEFAULT_CB_AFTER_BLOCK_2000
+        moneybox_vout.nValue = DEFAULT_CB_AFTER_BLOCK_100
         cb.vout.append(moneybox_vout)
-        self.compose_and_send_block(cb, [], False, 'bad-box-amount')
+        self.compose_and_send_block(cb, [], False, 'bad-cb-amount')
 
-        # A-28
-        # (height > 2000), with normal transactions not spending moneybox
+        # A-18
+        # (100 < height), with normal transactions not spending moneybox
         # try to fill up moneybox: rejected
         cb = create_coinbase(node0.getblockcount() + 1, cb_pubkey, fee1 + fee2)
         cb.vout.append(moneybox_vout)
         tx1 = self.create_tx_with_fee(fee1)
         tx2 = self.create_tx_with_fee(fee2)
-        self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-box-amount')
+        self.compose_and_send_block(cb, [tx1, tx2], False, 'bad-cb-amount')
 
 
 if __name__ == '__main__':

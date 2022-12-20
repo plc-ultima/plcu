@@ -83,11 +83,8 @@ struct Params {
 
     /** CA certificates created after this lock are invalid */
     uint32_t    maxCaBlock;
-    /** reduction of default fee */
-    int         defaultFeeReductionBlock;
     /** total money supply */
     CAmount     maxTotalAmount;
-
     /** new total rules after this block */
     uint32_t    startTotalNgBlock;
 };

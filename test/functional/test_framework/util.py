@@ -23,14 +23,15 @@ from .authproxy import AuthServiceProxy, JSONRPCException
 
 
 COIN = 100000000 # 1 PLCU in satoshis
-BASE_CB_AMOUNT = Decimal(5000)
-CB_AMOUNT_AFTER_BLOCK_100 = Decimal('0.005')
+BASE_CB_AMOUNT = Decimal(15000)
+CB_AMOUNT_AFTER_BLOCK_100 = Decimal('0.00005000')
+MONEYBOX_GRANULARITY = Decimal(0)
 DUST_OUTPUT_THRESHOLD = 54000
 DEFAULT_TX_CONFIRM_TARGET = 6
-GRAVE_ADDRESS_1_TESTNET = 'U2xFeMxJfqbjGFEoCiQ3wFProGrDct9Ep7Snk'  # P2PKH
-GRAVE_ADDRESS_2_TESTNET = 'U2xG44uNWvbszm6nhwJR9MEf1vz5MPg3MmtoM'  # P2SH(OP_INVALIDOPCODE)
-GRAVE_ADDRESS_1_MAINNET = 'U2xHJx3f6hbaDW4FvFvANLL4FJhuxg5Bo12ho'  # P2PKH
-GRAVE_ADDRESS_2_MAINNET = 'U2xHfRKJx7kiicc4SVeWpgWbX28bNRSt3ACeb'  # P2SH(OP_INVALIDOPCODE)
+GRAVE_ADDRESS_1_TESTNET = 'U1xtDNR5B9ik8qbMZETkH3jtfKp8BGPaHYSAD'  # P2PKH
+GRAVE_ADDRESS_2_TESTNET = 'U1xtnGBTcBGqF44Fc2y316rrEEeg7wbDyD6Ne'  # P2SH(OP_INVALIDOPCODE)
+GRAVE_ADDRESS_1_MAINNET = 'U1xPtGsuNviccXWGkTbERTxVAUd8RWtJ6243a'  # P2PKH
+GRAVE_ADDRESS_2_MAINNET = 'U1xpMYYdQu72FxRFqW1mPSMWrEzka7DPwXkFM'  # P2SH(OP_INVALIDOPCODE)
 VB_TOP_BITS = 0x20000000
 TXIN_MARKER_COINBASE = 0xFFFFFFFF  # TxInMarkerType::coinbase in cpp
 TXIN_MARKER_SUPERTX = 0  # TxInMarkerType::supertransaction in cpp
@@ -47,7 +48,7 @@ ONE_DAY = ONE_HOUR * 24
 ONE_MONTH = ONE_DAY * 30
 ONE_YEAR = ONE_DAY * 365
 
-TOTAL_EMISSION_LIMIT = Decimal(1100000)
+TOTAL_EMISSION_LIMIT = Decimal(2000000)
 
 logger = logging.getLogger("TestFramework.utils")
 
@@ -66,6 +67,10 @@ def assert_fee_amount(fee, tx_size, fee_per_kB):
 def assert_equal(thing1, thing2, *args):
     if thing1 != thing2 or any(thing1 != arg for arg in args):
         raise AssertionError("not(%s)" % " == ".join(str(arg) for arg in (thing1, thing2) + args))
+
+def assert_almost_equal(thing1, thing2, epsilon):
+    if abs(thing1 - thing2) > epsilon:
+        raise AssertionError(f'{thing1} != {thing2} with epsilon {epsilon}')
 
 def assert_greater_than(thing1, thing2):
     if thing1 <= thing2:
@@ -821,8 +826,9 @@ def verify_tx_sent(node, txid):
 
 def read_uint_from_buffer(buffer):
     buf_len = len(buffer)
-    assert_greater_than(buf_len, 0)
-    if buf_len == 1:
+    if buf_len == 0:
+        value = 0
+    elif buf_len == 1:
         value = struct.unpack('<B', buffer)[0]
     elif buf_len == 2:
         value = struct.unpack('<H', buffer)[0]
@@ -834,4 +840,11 @@ def read_uint_from_buffer(buffer):
         value = struct.unpack('<Q', buffer)[0]
     else:
         assert 0, f'invalid buf_len: {buf_len}'
+    return value
+
+def extract_total_amount_from_scriptsig(scriptsig_bin):
+    data_len = int(scriptsig_bin[0])
+    data = scriptsig_bin[1:]
+    assert_equal(data_len, len(data))
+    value = read_uint_from_buffer(data)
     return value

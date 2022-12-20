@@ -117,13 +117,13 @@ config.pri
 .idea
 
 # Qt creator files:
-plc-ultima.cflags
-plc-ultima.config
-plc-ultima.creator
-plc-ultima.creator.user*
-plc-ultima.cxxflags
-plc-ultima.files
-plc-ultima.includes
+*.cflags
+*.config
+*.creator
+*.creator.user*
+*.cxxflags
+*.files
+*.includes
 
 # for python venv:
 env

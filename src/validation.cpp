@@ -1279,12 +1279,7 @@ std::pair<CAmount, bool> GetBlockSubsidy(const int nHeight, const CAmount & nFee
     if (nHeight <= consensusParams.countOfInitialAmountBlocks)
     {
         // initial coins
-        return std::make_pair(5000 * COIN, true);
-    }
-
-    else if (nHeight <= consensusParams.defaultFeeReductionBlock)
-    {
-        return std::make_pair(std::max<int64_t>(nFees/2, .005 * COIN), false);
+        return std::make_pair(15000 * COIN, true);
     }
 
     // min fee = 0.005 coins, 500000 satoshi
@@ -2177,7 +2172,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     bool    is_coinbaseTotalFound = false;
     bool    is_prevTotalFound     = false;
 
-    CAmount prevTotal      = 0;
+    CAmount prevTotal = 0;
     if (is_totalNg)
     {
         CBlock prevblock;
@@ -2213,8 +2208,8 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
 
         if (tx.IsCoinBase())
         {
-            // coinbase
-            if (is_totalNg && is_prevTotalFound)
+            // coinbase (no prev for height == 1)
+            if (is_totalNg && (is_prevTotalFound || pindex->nHeight == 1))
             {
                 for (const CTxIn & in : tx.vin)
                 {
@@ -2361,13 +2356,17 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
                     chainparams.GetConsensus().maxTotalAmount - prevTotal;
     }
 
-    CAmount fullTotal = prevTotal + nRefill + (blockSubsidy.second ? blockSubsidy.first : 0);
-    if (prevTotal != 0 && ((coinbaseTotal != fullTotal) || (coinbaseTotal < prevTotal)))
+    if (is_totalNg)
     {
-        LogPrintf("bad-coinbase-wrong-total, prevTotal: %i, nRefill: %i, fullTotal: %i, blockSubsidy: %i:%i, coinbaseTotal: %i\n",
-                  prevTotal, nRefill, fullTotal, blockSubsidy.first, blockSubsidy.second, coinbaseTotal);
-        return state.DoS(100, error("ConnectBlock(): bad coinbase wrong total amount"),
-                         REJECT_INVALID, "bad-coinbase-wrong-total");
+        // for first block prevTotal is 0
+        CAmount fullTotal = prevTotal + nRefill + (blockSubsidy.second ? blockSubsidy.first : 0);
+        if ((pindex->nHeight == 1 || prevTotal != 0) && ((coinbaseTotal != fullTotal) || (coinbaseTotal < prevTotal)))
+        {
+            LogPrintf("bad-coinbase-wrong-total, prevTotal: %i, nRefill: %i, fullTotal: %i, blockSubsidy: %i:%i, coinbaseTotal: %i\n",
+                      prevTotal, nRefill, fullTotal, blockSubsidy.first, blockSubsidy.second, coinbaseTotal);
+            return state.DoS(100, error("ConnectBlock(): bad coinbase wrong total amount"),
+                             REJECT_INVALID, "bad-coinbase-wrong-total");
+        }
     }
 
     if (coinbaseTotal > chainparams.GetConsensus().maxTotalAmount)

@@ -5,7 +5,7 @@
 #
 
 from test_framework.mininode import *
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import *
 from test_framework.script import *
 from test_framework.certs import *
@@ -161,9 +161,25 @@ class TotalEmissionTest(BitcoinTestFramework):
         return total_got
 
     def run_test(self):
-        self.taxfree_cert_filename = os.path.join(self.options.tmpdir + '/node0/regtest', 'taxfree.cert')
         node0 = self.nodes[0]
         node1 = self.nodes[1]
+
+        # Check total amount in blockchain:
+        total_amount_prev = 0
+        for i in range(1, 200):
+            hash1 = node0.getblockhash(i)
+            block1 = node0.getblock(hash1, 2)
+            total_am_inputs = [inp for inp in block1['tx'][0]['vin'] if inp['coinbasetype'] == TXIN_MARKER_TOTAL_AMOUNT]
+            assert_equal(len(total_am_inputs), 1)
+            total_amount = extract_total_amount_from_scriptsig(hex_str_to_bytes(total_am_inputs[0]['coinbase']))
+            assert_greater_than_or_equal(total_amount, total_amount_prev)
+            if total_amount:
+                assert_equal(ToCoins(total_amount), BASE_CB_AMOUNT * min(i, 100))
+            total_amount_prev = total_amount
+
+        if not MONEYBOX_GRANULARITY:
+            raise SkipTest('no moneybox - no new money - no reaching total emission limit')
+        self.taxfree_cert_filename = os.path.join(self.options.tmpdir + '/node0/regtest', 'taxfree.cert')
         self.test_node.sync_with_ping()
         self.test_node2.sync_with_ping()
         fee = Decimal('0.00001000')

@@ -21,20 +21,20 @@ BOOST_AUTO_TEST_CASE(subsidy_limit_test)
     // countOfInitialAmountBlocks blocks = 56kk*COIN
     for (; nHeight <= consensusParams.countOfInitialAmountBlocks; ++nHeight) {
         std::pair<CAmount, bool> nSubsidy = GetBlockSubsidy(nHeight, 0, consensusParams);
-        BOOST_CHECK(nSubsidy.first == 5000 * COIN);
+        BOOST_CHECK(nSubsidy.first == 15000 * COIN);
         nSum += nSubsidy.first;
         BOOST_CHECK(MoneyRange(nSubsidy.first));
     }
 
-    BOOST_CHECK_EQUAL(nSum, 500000LL*COIN);
+    BOOST_CHECK_EQUAL(nSum, 1500000LL*COIN);
 
     // next blocks - 0
-    BOOST_CHECK(GetBlockSubsidy(   101, 0, consensusParams).first ==   0.005 * COIN);
-    BOOST_CHECK(GetBlockSubsidy(  1001, 0, consensusParams).first ==   0.005 * COIN);
-    BOOST_CHECK(GetBlockSubsidy( 10001, 0, consensusParams).first ==   0.005 * COIN);
-    BOOST_CHECK(GetBlockSubsidy( 25000, 0, consensusParams).first ==   0.005 * COIN);
-    BOOST_CHECK(GetBlockSubsidy( 25001, 0, consensusParams).first ==   0.005 * COIN);
-    BOOST_CHECK(GetBlockSubsidy( 35000, 0, consensusParams).first ==   0.005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy(   101, 0, consensusParams).first == 0.00005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy(  1001, 0, consensusParams).first == 0.00005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 10001, 0, consensusParams).first == 0.00005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 25000, 0, consensusParams).first == 0.00005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 25001, 0, consensusParams).first == 0.00005 * COIN);
+    BOOST_CHECK(GetBlockSubsidy( 35000, 0, consensusParams).first == 0.00005 * COIN);
     BOOST_CHECK(GetBlockSubsidy( 35001, 0, consensusParams).first == 0.00005 * COIN);
     BOOST_CHECK(GetBlockSubsidy(100001, 0, consensusParams).first == 0.00005 * COIN);
 }

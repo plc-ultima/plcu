@@ -28,7 +28,7 @@ from .bignum import bn2vch
 MAX_SCRIPT_SIZE = 10000
 MAX_SCRIPT_ELEMENT_SIZE = 520
 MAX_SCRIPT_OPCODES = 201
-GRAVE_1_PKH_TESTNET = hex_str_to_bytes('7e8d5abc0c1910fd3fcbb74617cb6ca9bf784aca')
+GRAVE_1_PKH_TESTNET = hex_str_to_bytes('19c88fc858da14a102f671baec1472957a039ded')
 GRAVE_1_PKH_MAINNET = hex_str_to_bytes('a20c0a4960089d017940b351cbd015da052b482a')
 GRAVE_1_PKH = GRAVE_1_PKH_TESTNET
 GRAVE_2_SH = hex_str_to_bytes('8296da5ca015c76181754a475b0677012cf63960')
@@ -996,7 +996,7 @@ def GetAbMintingLockedMultisigScript(key_user, project_key, timepoint):
                     hash160(project_key.get_pubkey()), OP_EQUALVERIFY, OP_2, OP_CHECKMULTISIG, OP_ENDIF])
 
 def AddressFromPubkeyHash(pubkeyhash, testnet = True):
-    prefix = b'\xC8\x05\x24' if testnet else b'\xC8\x05\x28'
+    prefix = b'\xC7\xE4\xD7' if testnet else b'\xC7\xE4\x90'
     payload = prefix + pubkeyhash
     hash = hash256(payload)
     payload += hash[0:4]
@@ -1006,7 +1006,7 @@ def AddressFromPubkey(pubkey, testnet = True):
     return AddressFromPubkeyHash(hash160(pubkey), testnet)
 
 def AddressFromScriptHash(scripthash, testnet = True):
-    prefix = b'\xC8\x05\x25' if testnet else b'\xC8\x05\x29'
+    prefix = b'\xC7\xE4\xD8' if testnet else b'\xC7\xE4\xCD'
     payload = prefix + scripthash
     hash = hash256(payload)
     payload += hash[0:4]
@@ -1026,14 +1026,14 @@ def GraveScript2():
     return GetP2SHScript(op_checkreward_hash)
 
 def SecretBytesToBase58(secret_bytes, testnet = True):
-    prefix = b'\xC8\x05\xDE' if testnet else b'\xC8\x04\xAA'
+    prefix = b'\xC8\x06\xDE' if testnet else b'\xC7\xE4\x09'
     payload = prefix + secret_bytes
     hash = hash256(payload)
     payload += hash[0:4]
     return b58encode(payload)
 
 def Base58ToSecretBytes(key_base58, testnet = True):
-    prefix = b'\xC8\x05\xDE' if testnet else b'\xC8\x04\xAA'
+    prefix = b'\xC8\x06\xDE' if testnet else b'\xC7\xE4\x09'
     decoded = b58decode(key_base58)
     payload = decoded[:-4]
     hash_calc = hash256(payload)
